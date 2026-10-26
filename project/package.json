@@ -1,18 +1,40 @@
 {
-  "name": "clipnote-integration-validation",
+  "name": "clipnote",
   "version": "0.0.0",
   "private": true,
   "type": "module",
-  "description": "ClipNote T02 最小接入验证，不包含桌面业务实现",
-  "engines": { "node": ">=24.14.1" },
+  "description": "ClipNote 桌面文件工作台与接入验证工具",
+  "engines": {
+    "node": ">=24.14.1"
+  },
   "scripts": {
-    "test": "node --test tests/integration/*.test.mjs",
+    "test": "node --test tests/unit/*.test.ts tests/integration/*.test.mjs",
+    "test:unit": "node --test tests/unit/*.test.ts",
+    "test:integration": "node --test tests/integration/*.test.mjs",
+    "test:e2e": "node --test tests/e2e/*.test.mjs",
+    "typecheck": "tsc --noEmit",
+    "build": "node tools/build-desktop.mjs",
+    "start": "node tools/start-desktop.mjs",
+    "dev": "npm run build && npm start",
     "verify:runtime": "node tools/verify-runtime.mjs",
     "verify:electron": "node tools/run-electron-verification.mjs",
     "verify:login": "node tools/run-electron-verification.mjs --login",
     "verify:api": "node tools/verify-api.mjs",
     "verify:smartsub": "node tools/verify-smartsub.mjs"
   },
-  "dependencies": { "@earendil-works/pi-ai": "1.4.0" },
-  "devDependencies": { "electron": "45.0.0" }
+  "dependencies": {
+    "@earendil-works/pi-ai": "1.4.0",
+    "react": "19.3.1",
+    "react-dom": "19.3.1"
+  },
+  "devDependencies": {
+    "@types/node": "24.19.2",
+    "@types/react": "19.3.0",
+    "@types/react-dom": "19.3.0",
+    "electron": "45.0.0",
+    "esbuild": "0.28.2",
+    "playwright": "1.64.1",
+    "typescript": "7.0.2",
+    "vite": "8.3.5"
+  }
 }

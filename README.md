@@ -1,15 +1,17 @@
 # ClipNote
 
-ClipNote 是规划中的 Windows 桌面 App：把视频字幕或已有文本整理成可追溯的 Markdown 层级笔记，在 App 内查看标题树与正文，并保存到指定本地位置。
+ClipNote 是开发中的 Windows 桌面 App，目标是把视频字幕或已有文本整理成可追溯的 Markdown 层级笔记，在 App 内阅读并保存到指定本地位置。
 
 首版设计支持 SRT、VTT、TXT、MD 导入，API 与 ChatGPT 订阅两种 AI 连接，以及可选 SmartSub 来源。SmartSub 接入也属于首版交付要求；文件分析和本地阅读可独立使用。Obsidian 只是可选外部编辑器。
 
-当前已建立 T02 最小接入验证工具、锁定依赖和本地检查；尚无 App 界面、业务模块或可安装产品。运行方式见 [project/README](project/README.md)。任务授权与实际进度统一见[任务清单](docs/任务清单.md)。
+当前已有可运行的桌面文件工作台：选择 SRT/VTT/TXT/MD，查看来源片段、字幕时间、行号和原文高亮。导入与查看完全在本地进行，无需 AI 登录或 SmartSub。当前会话保留最近五份来源，关闭后清空；笔记生成、持久化、Markdown 标题树与安装包属于后续任务。
+
+已安装依赖时，在 `project/` 中执行 `npm.cmd run build`，再执行 `npm.cmd start` 即可打开窗口。首次准备与所有验证命令见 [project/README](project/README.md)；可用[合成字幕](project/tests/fixtures/示例%20字幕.srt)试用。任务授权与实际进度统一见[任务清单](docs/任务清单.md)。
 
 ## 目录与阅读顺序
 
-- 项目根目录：`D:\Obsidian\Obsidian\10-项目\ClipNote`，统筹项目、文档与各 agent 交接。
-- `project/`：源码、测试与配置；当前仅有 T02 验证工具，不另建仓库。
+- 项目根目录为本 README 所在目录；B 电脑为 `D:\Obsidian\yuenanmu\10-项目\ClipNote`，A 电脑路径以其实际克隆为准。
+- `project/`：桌面源码、测试、配置及 T02 验证工具，不另建仓库。
 - `docs/`：需求、架构、任务和交接。
 - `prompts/`：对话参考模板，不构成授权。
 
@@ -17,8 +19,8 @@ ClipNote 是规划中的 Windows 桌面 App：把视频字幕或已有文本整�
 
 ## 当前阶段
 
-文档分支已按用户明确批准合入 main（cc19831）。当前在 chore/integration-validation 做 T02；API 真实验证由用户选择延后，SmartSub 安装尚缺。本分支不自动合并或推送，后续业务任务另行选择。
+当前工作分支为 `feat/source-import`，基线 `f441be1`。用户授权先尝试 B 电脑 T02 登录，页面无法访问后暂缓并实施 T03；API 真实验证继续延后。B 已找到 SmartSub 3.10.1，自带 CLI 帮助检查通过，真实任务/字幕链尚未验证。当前分支不自动合并或推送，T04 及后续任务另行选择。
 
-技术路线采用 Electron、React、TypeScript 与 pi-ai，SmartSub 通过 CLI 适配。已验证本机 Electron/pi-ai 运行和一次订阅文本请求；API、完整登录生命周期、Windows SmartSub CLI 与打包仍需相应真实验收。网站兼容沿用 SmartSub，ClipNote 优先验证 CLI 调用及字幕结果接入；不要求用户先列网站清单。上游能力仍不能代替本应用的实际集成验证。
+技术路线采用 Electron、React、TypeScript 与 pi-ai，SmartSub 通过 CLI 适配。T02 曾在 A 电脑完成一次订阅文本请求；B 的本地运行环境和桌面功能已建立，官方登录仍待可用网络。API、完整登录生命周期、SmartSub 实际任务与打包仍需真实验收。
 
 本地来源、生成笔记、模型、运行时和凭据不进入 Git；仅保存必要的公开或合成验证资料。
