@@ -1,0 +1,28 @@
+# 本项目的依赖、运行产物、本地配置与凭据；按实际技术栈补充。
+.obsidian/
+.work/
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+node_modules/
+.venv/
+venv/
+__pycache__/
+.pytest_cache/
+*.pyc
+dist/
+build/
+coverage/
+*.log
+.DS_Store
+Thumbs.db
+# 不要忽略项目文档、测试代码或已采用的依赖锁文件。
+# ClipNote 本地资料、下载运行时及桌面打包产物。
+.local/
+.runtime/
+.cache/
+project/out/
+project/release/
+*.tsbuildinfo
