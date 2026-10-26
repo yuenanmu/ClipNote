@@ -13,12 +13,12 @@ ClipNote 是规划中的 Windows 桌面 App：把视频字幕或已有文本整�
 - `docs/`：需求、架构、任务和交接。
 - `prompts/`：对话参考模板，不构成授权。
 
-先读 [AGENTS](AGENTS.md)、[项目索引](docs/项目索引.md)、[当前交接](docs/当前交接.md)，再读[架构](docs/架构.md)及相关任务。
+先读 [AGENTS](AGENTS.md)、[项目索引](docs/项目索引.md)、[当前交接](docs/当前交接.md)，再读[架构](docs/架构.md)、[模块索引](docs/模块/模块索引.md)及相关任务。任务清单用复选框显示完成情况，模块文档说明职责、接口与依赖。
 
 ## 当前阶段
 
 本轮只做需求确认、文档和本地 Git 准备。初始化基线保留在 `main`，确认后的规划提交到 `docs/project-kickoff`，不合并、不推送；后续开发由用户另行选择任务。
 
-技术路线采用 Electron、React、TypeScript 与 pi-ai，SmartSub 通过 CLI 适配。源码、运行时兼容、两种真实 AI 连接、Windows CLI 与打包均须后续验证。必测视频网站仍待用户填写，不能把上游支持范围等同于 ClipNote 已验收范围。
+技术路线采用 Electron、React、TypeScript 与 pi-ai，SmartSub 通过 CLI 适配。源码、运行时兼容、两种真实 AI 连接、Windows CLI 与打包均须后续验证。网站兼容沿用 SmartSub，ClipNote 优先验证 CLI 调用及字幕结果接入；不要求用户先列网站清单。上游能力仍不能代替本应用的实际集成验证。
 
 本地来源、生成笔记、模型、运行时和凭据不进入 Git；仅保存必要的公开或合成验证资料。
