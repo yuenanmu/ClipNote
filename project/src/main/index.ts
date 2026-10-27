@@ -6,6 +6,8 @@ import { createImportHandler } from './import-controller.ts';
 import { createStorageHandlers } from './storage-controller.ts';
 import { createReaderHandlers } from './reader-controller.ts';
 import { createApiHandlers } from './api-controller.ts';
+import { createWorkflowHandlers } from './workflow-controller.ts';
+import { runAnalysisWorker } from './analysis-task.ts';
 import { ApiConfigStore, normalizeBaseUrl } from '../modules/api/config.ts';
 import { listModels, resolveModelKey } from '../modules/api/models.ts';
 import { createApiAdapter } from '../modules/api/provider.ts';
@@ -105,6 +107,13 @@ app.whenReady().then(() => {
   });
   for (const [action, handler] of Object.entries(readerHandlers)) ipcMain.handle(`reader:${action}`, handler);
   const apiStore = new ApiConfigStore(join(local, 'api'), safeStorage);
+  const workflowHandlers = createWorkflowHandlers({ isTrustedSender: trusted, source: id => snapshots.get(id), credentials: () => apiStore.credentials(),
+    hasDirectory: async () => Boolean((await tasks.run(join(__dirname, 'storage-worker.cjs'), { stateDir: join(local, 'storage'), action: 'state', payload: {} }, true)).directory),
+    analyze: (source, credentials, options) => runAnalysisWorker(join(__dirname, 'analysis-worker.cjs'), source, credentials, options),
+    save: (source, result) => tasks.run(join(__dirname, 'storage-worker.cjs'), { stateDir: join(local, 'storage'), action: 'save-generated', payload: { snapshot: source, markdown: result.markdown, metadata: { kind: 'generated-note', provider: result.attempt.provider, model: result.attempt.model, promptVersion: result.attempt.promptVersion, sourceRefs: result.sourceRefs } } }, true),
+    resume: draftId => tasks.run(join(__dirname, 'storage-worker.cjs'), { stateDir: join(local, 'storage'), action: 'resume', payload: { draftId } }, true),
+  });
+  for (const [action, handler] of Object.entries(workflowHandlers)) ipcMain.handle(`workflow:${action}`, handler);
   const apiHandlers = createApiHandlers({ isTrustedSender: trusted, store: apiStore, models: async (input, signal) => {
     const baseUrl = normalizeBaseUrl(input.baseUrl); const key = await resolveModelKey(apiStore, baseUrl, input.apiKey);
     return listModels(baseUrl, key, signal);
@@ -124,6 +133,7 @@ app.whenReady().then(() => {
     for (const action of Object.keys(storageHandlers)) ipcMain.removeHandler(`storage:${action}`);
     for (const action of Object.keys(readerHandlers)) ipcMain.removeHandler(`reader:${action}`);
     for (const action of Object.keys(apiHandlers)) ipcMain.removeHandler(`api:${action}`);
+    for (const action of Object.keys(workflowHandlers)) ipcMain.removeHandler(`workflow:${action}`);
     tasks.stop(); snapshots.clear();
   });
   void window.loadFile(join(__dirname, '../renderer/index.html'));
