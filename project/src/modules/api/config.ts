@@ -4,11 +4,15 @@ import type { ApiConfigInput, ApiState } from '../../contracts/api.ts';
 import { ApiError } from './errors.ts';
 export interface Protector { isEncryptionAvailable(): boolean; encryptString(value: string): Buffer; decryptString(value: Buffer): string }
 interface Stored { version: 1; baseUrl: string; model: string; contextWindow: number; maxTokens: number; encryptedKey: string }
+export function normalizeBaseUrl(baseUrl: string): string {
+  if (typeof baseUrl !== 'string' || baseUrl.length > 2048) throw new ApiError('INVALID_CONFIG');
+  let url: URL; try { url = new URL(baseUrl); } catch { throw new ApiError('INVALID_CONFIG'); }
+  if (url.username || url.password || url.search || url.hash || !(url.protocol === 'https:' || (url.protocol === 'http:' && ['127.0.0.1', 'localhost', '[::1]'].includes(url.hostname)))) throw new ApiError('INVALID_CONFIG');
+  return url.href.replace(/\/$/, '');
+}
 function validate(value: ApiConfigInput): Omit<ApiConfigInput, 'apiKey'> {
   if (!value || typeof value !== 'object' || Object.keys(value).sort().join(',') !== 'apiKey,baseUrl,contextWindow,maxTokens,model' || typeof value.baseUrl !== 'string' || value.baseUrl.length > 2048 || typeof value.model !== 'string' || !value.model.trim() || value.model.length > 128 || /[\x00-\x20\x7f]/.test(value.model) || typeof value.apiKey !== 'string' || value.apiKey.length > 4096 || /[\x00-\x1f\x7f]/.test(value.apiKey) || !Number.isSafeInteger(value.contextWindow) || value.contextWindow < 4096 || value.contextWindow > 1000000 || !Number.isSafeInteger(value.maxTokens) || value.maxTokens < 64 || value.maxTokens > 32768 || value.maxTokens > value.contextWindow / 2) throw new ApiError('INVALID_CONFIG');
-  let url: URL; try { url = new URL(value.baseUrl); } catch { throw new ApiError('INVALID_CONFIG'); }
-  if (url.username || url.password || url.search || url.hash || !(url.protocol === 'https:' || (url.protocol === 'http:' && ['127.0.0.1', 'localhost', '[::1]'].includes(url.hostname)))) throw new ApiError('INVALID_CONFIG');
-  return { baseUrl: url.href.replace(/\/$/, ''), model: value.model.trim(), contextWindow: value.contextWindow, maxTokens: value.maxTokens };
+  return { baseUrl: normalizeBaseUrl(value.baseUrl), model: value.model.trim(), contextWindow: value.contextWindow, maxTokens: value.maxTokens };
 }
 export class ApiConfigStore {
   private readonly path: string; private readonly protector: Protector;

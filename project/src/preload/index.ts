@@ -4,6 +4,7 @@ const api: DesktopApi = {
   apiState: (...args: unknown[]) => ipcRenderer.invoke('api:state', ...args),
   apiSave: (...args: unknown[]) => ipcRenderer.invoke('api:save', ...args),
   apiTest: (...args: unknown[]) => ipcRenderer.invoke('api:test', ...args),
+  apiModels: (...args: unknown[]) => ipcRenderer.invoke('api:models', ...args),
   apiCancel: (...args: unknown[]) => ipcRenderer.invoke('api:cancel', ...args),
   noteList: (...args: unknown[]) => ipcRenderer.invoke('reader:noteList', ...args),
   noteAdd: (...args: unknown[]) => ipcRenderer.invoke('reader:noteAdd', ...args),

@@ -6,7 +6,8 @@ import { createImportHandler } from './import-controller.ts';
 import { createStorageHandlers } from './storage-controller.ts';
 import { createReaderHandlers } from './reader-controller.ts';
 import { createApiHandlers } from './api-controller.ts';
-import { ApiConfigStore } from '../modules/api/config.ts';
+import { ApiConfigStore, normalizeBaseUrl } from '../modules/api/config.ts';
+import { listModels, resolveModelKey } from '../modules/api/models.ts';
 import { createApiAdapter } from '../modules/api/provider.ts';
 import { ApiError } from '../modules/api/errors.ts';
 import { parseSource } from '../modules/source/parser.ts';
@@ -104,7 +105,10 @@ app.whenReady().then(() => {
   });
   for (const [action, handler] of Object.entries(readerHandlers)) ipcMain.handle(`reader:${action}`, handler);
   const apiStore = new ApiConfigStore(join(local, 'api'), safeStorage);
-  const apiHandlers = createApiHandlers({ isTrustedSender: trusted, store: apiStore, test: async signal => {
+  const apiHandlers = createApiHandlers({ isTrustedSender: trusted, store: apiStore, models: async (input, signal) => {
+    const baseUrl = normalizeBaseUrl(input.baseUrl); const key = await resolveModelKey(apiStore, baseUrl, input.apiKey);
+    return listModels(baseUrl, key, signal);
+  }, test: async signal => {
     const credentials = await apiStore.credentials();
     const source = parseSource(Buffer.from('ClipNote 合成连接测试。'), '测试.txt');
     const profile = { provider: 'api', model: credentials.model, promptVersion: 't06-v1', inputCharBudget: 2000, outputCharBudget: 64000, overlapChars: 0 };

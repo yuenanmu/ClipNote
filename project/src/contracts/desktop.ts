@@ -13,6 +13,7 @@ export interface DesktopApi {
   apiState(): Promise<ApiResult<ApiState>>;
   apiSave(input: ApiConfigInput): Promise<ApiResult<ApiState>>;
   apiTest(): Promise<ApiResult<null>>;
+  apiModels(input: { baseUrl: string; apiKey: string }): Promise<ApiResult<string[]>>;
   apiCancel(): Promise<ApiResult<null>>;
   noteList(): Promise<ReaderResult<NoteEntry[]>>;
   noteAdd(): Promise<ReaderResult<ReaderDocument>>;

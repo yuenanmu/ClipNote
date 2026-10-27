@@ -20,7 +20,7 @@ test('pi-ai sends one configured request and the result passes actual T06 valida
   assert.equal(count, 1); assert.equal(received.url, '/v1/chat/completions'); assert.equal(received.auth, `Bearer ${secret}`); assert.equal(received.body.model, profile.model); assert.ok(JSON.stringify(received.body).includes('合成原文')); assert.ok(result.markdown.includes('要点')); assert.ok(!JSON.stringify(result).includes(secret));
 });
 test('HTTP errors map to sanitized categories without retry or response body leakage', async t => {
-  for (const [status, expected] of [[400,'INVALID_CONFIG'], [404,'INVALID_CONFIG'], [401,'AUTH_FAILED'], [403,'PERMISSION_DENIED'], [429,'QUOTA'], [500,'NETWORK']] as const) {
+  for (const [status, expected] of [[400,'INVALID_CONFIG'], [404,'INVALID_CONFIG'], [401,'AUTH_FAILED'], [402,'BALANCE'], [403,'PERMISSION_DENIED'], [429,'RATE_LIMIT'], [500,'NETWORK']] as const) {
     let count = 0; const base = await server(t, (_req,res) => { count++; res.writeHead(status, { 'Content-Type': 'application/json' }); res.end(JSON.stringify({ error: { message: secret } })); });
     const adapter = createApiAdapter(credentials(base)); const req = { chunk: { chunkId: 'test', index: 0, core: [], context: [], request: '合成' }, profile, repair: false };
     await assert.rejects(adapter(req), (error: any) => { assert.equal(error.code, expected); assert.ok(!String(error).includes(secret)); return true; }); assert.equal(count, 1);

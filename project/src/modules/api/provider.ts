@@ -36,7 +36,7 @@ export function createApiAdapter(credentials: ApiConfigInput): AnalysisAdapter {
       } });
       if (request.signal?.aborted) throw new ApiError('CANCELLED');
       if (timeout.aborted) throw new ApiError('NETWORK');
-      if (status === 400 || status === 404) throw new ApiError('INVALID_CONFIG'); if (status === 401) throw new ApiError('AUTH_FAILED'); if (status === 403) throw new ApiError('PERMISSION_DENIED'); if (status === 429) throw new ApiError('QUOTA'); if (status && status >= 400) throw new ApiError('NETWORK');
+      if (status === 400 || status === 404 || status === 422) throw new ApiError('INVALID_CONFIG'); if (status === 401) throw new ApiError('AUTH_FAILED'); if (status === 402) throw new ApiError('BALANCE'); if (status === 403) throw new ApiError('PERMISSION_DENIED'); if (status === 429) throw new ApiError('RATE_LIMIT'); if (status && status >= 400) throw new ApiError('NETWORK');
       if (response.stopReason === 'length') return { status: 'truncated', value: null };
       if (response.stopReason !== 'stop') throw new ApiError(status && status >= 200 && status < 300 ? 'INVALID_RESPONSE' : 'NETWORK');
       const text = response.content.filter(part => part.type === 'text').map(part => part.text).join('').trim();
