@@ -22,7 +22,7 @@ npm.cmd start
 - `src/renderer/`：当前会话、片段列表和原文预览；不直接访问 Node、文件系统或凭据。
 - `npm.cmd run typecheck`：TypeScript 类型检查。
 - `npm.cmd test`：来源/桌面控制单元测试及 T02 本地集成回归；不会发真实 AI 请求。
-- `npm.cmd run test:e2e`：真实 Electron 窗口、四格式文件导入、取消/恢复、安全边界和长文件定位。测试替换系统文件选择对话框以选择合成文件，读取/解析/显示仍走真实链路。无需另下浏览器，截图在 `../.local/test-artifacts/`。
+- `npm.cmd run test:e2e`：顺序运行两类检查：Playwright 的四格式导入/取消/恢复/安全/长文件定位，以及不带调试器、直接执行 `npm.cmd start` 的 Windows 原生窗口显示、最小化、最大化、还原和关闭退出。前一类替换文件选择对话框返回值，后一类按测试拥有的进程树发送 Windows 系统窗口命令，不调用 Playwright app.close()；测试期间请关闭其他 ClipNote 窗口。无需另下浏览器，截图在 `../.local/test-artifacts/`，`npm-start-native.png` 为含系统标题栏的原生窗口截图。
 
 实际数量、验证时间和未测范围统一见 `../docs/任务清单.md`。
 
