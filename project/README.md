@@ -1,6 +1,6 @@
 # ClipNote 开发与验证
 
-当前包含 T03 桌面文件工作台和 T02 独立接入探针。桌面源码使用 TypeScript，界面采用 React；探针继续使用 Node ESM。桌面已支持四格式导入、来源片段、原文位置和长文件分页；AI 分析、保存版本、Markdown 阅读器和安装包尚未实现。
+当前包含桌面文件工作台、本地来源归档与版本保存，以及 T02 独立接入探针。桌面源码使用 TypeScript，界面采用 React；探针继续使用 Node ESM。桌面已支持四格式导入、来源片段、原文位置、长文件分页、归档版本及保存恢复；AI 分析、Markdown 阅读器和安装包尚未实现。
 
 ## 打开桌面窗口
 
@@ -13,16 +13,31 @@ npm.cmd start
 
 也可以执行 `npm.cmd run dev` 顺序构建并打开窗口。当前不提供热更新。用 `tests/fixtures/示例 字幕.srt` 可体验字幕时间与行号定位。
 
-导入只读取明确选择的文件，不改变原文件；窗口保留最近五份来源，关闭后清空。单文件上限 16 MiB、最多 20,000 个片段；长原文按 200,000 字符分页，可从片段跳转并高亮对应原文。正文按纯文本显示，网络请求和外部窗口被阻断。
+导入只读取明确选择的文件，不改变原文件；会话保留最近五份来源，未归档的来源关闭后清空。单文件上限 16 MiB、最多 20,000 个片段；长原文按 200,000 字符分页，可从片段跳转并高亮对应原文。正文按纯文本显示，网络请求和外部窗口被阻断。同一应用数据目录只允许一个窗口实例，再次启动会唤起已有窗口。
+
+## 保存、版本与恢复
+
+1. 点击“选择保存目录”，选择本地父目录；应用在其中创建专属 `ClipNote/`。也可以直接选择已有且带 ClipNote 标记的库目录。
+2. 导入文件后点击“保存来源”。此时保存完整原始字节、原文归档 Markdown 和追溯信息，不调用 AI。即使导入后原文件被修改，保存的仍是导入时的快照。
+3. 左侧“已保存版本”可重新打开来源。每次保存创建独立版本，外部编辑过的 `note.md` 会标注修改并保留原样。
+4. 完整草稿落盘后若保存失败，重启仍可看到待恢复草稿；可以先更改目录，再点击重试，不重新导入或调用模型。
+
+库内目录为 `items/<sourceId>/revisions/<revisionId>/`，包含 `note.md`、`source.<原格式>`、`source.json`、`manifest.json` 和管理标记。普通编辑器可打开这些文件；移动整个库后重新选择库目录即可读取，内部文件引用使用相对路径。
+
+保存先在开发 userData 的 `../.local/desktop/storage/drafts/` 准备草稿，再在目标盘独占创建版本目录；文件写入、刷新和校验后，最后创建 `.committed` 标记。未提交/损坏版本不会出现在成功列表。来源及元数据损坏会拒绝打开，Markdown 的外部修改只提示而不覆盖。草稿尚未完整落盘时发生的中断不能保证恢复；目标目录中的未提交残留保留原样，不擅自清理。
+
+当前开发设置和恢复草稿在 `../.local/desktop/storage/`，输出位置必须明确选择；拒绝接管没有专属标记的同名 ClipNote 目录，也拒绝管理路径中的符号链接/junction。开发时禁止选代码仓库内作为输出，已忽略的 `.local/`、`.runtime/` 子目录除外。安装包的正式数据路径由 T12 确定。
 
 ## 桌面源码与检查
 
-- `src/main/`、`src/preload/`：窗口、可信主 frame 的受限导入 IPC 和文件处理 Worker。
-- `src/contracts/`、`src/modules/source/`：来源契约、严格解码、时间戳/段落解析和有上限的读取。
-- `src/renderer/`：当前会话、片段列表和原文预览；不直接访问 Node、文件系统或凭据。
+- `src/main/`、`src/preload/`：窗口、可信主 frame 的受限导入/存储 IPC 和文件 Worker。
+- `src/contracts/`、`src/modules/source/`、`src/modules/storage/`：来源字节快照、解析、版本发布和恢复；存储接口接受 Markdown 与白名单元数据，供后续生成流程复用。
+- `src/renderer/`：当前会话、来源预览、归档列表与重试入口；不直接访问 Node、文件系统或凭据。
 - `npm.cmd run typecheck`：TypeScript 类型检查。
 - `npm.cmd test`：来源/桌面控制单元测试及 T02 本地集成回归；不会发真实 AI 请求。
-- `npm.cmd run test:e2e`：顺序运行两类检查：Playwright 的四格式导入/取消/恢复/安全/长文件定位，以及不带调试器、直接执行 `npm.cmd start` 的 Windows 原生窗口显示、最小化、最大化、还原和关闭退出。前一类替换文件选择对话框返回值，后一类按测试拥有的进程树发送 Windows 系统窗口命令，不调用 Playwright app.close()；测试期间请关闭其他 ClipNote 窗口。无需另下浏览器，截图在 `../.local/test-artifacts/`，`npm-start-native.png` 为含系统标题栏的原生窗口截图。
+- `npm.cmd run test:e2e`：顺序运行 Playwright 的导入/安全/定位、归档/外部修改/重启/恢复，以及不带调试器、直接执行 `npm.cmd start` 的原生显示、重复启动、最小化、最大化、还原和关闭退出。Playwright 替换系统选择框返回值，后续 IPC/Worker/文件写入执行真实代码；普通启动回归按测试拥有的进程树发送 Windows 系统窗口命令，不调用 Playwright app.close()。无需另下浏览器，截图在 `../.local/test-artifacts/`，`npm-start-native.png` 为含系统标题栏的截图，`storage-versions.png` 为版本面板。
+
+E2E 为每组测试创建独立 userData 和输出目录，只清理自己拥有的资源，不更改日常保存位置。内部 `CLIPNOTE_TEST_USER_DATA` 仅允许指向本项目 `.local/test-artifacts/` 内；不要在日常运行设置它。受限执行环境若阻止 Electron 访问运行时，应在获准的系统桌面运行检查，不通过关闭产品 sandbox 或修改系统 ACL 绕过。
 
 实际数量、验证时间和未测范围统一见 `../docs/任务清单.md`。
 

@@ -15,6 +15,28 @@ svg { flex-shrink: 0; }
 .nav-current .nav-dot { margin-left: auto; width: 5px; height: 5px; border-radius: 50%; background: #9ed8c2; }
 .session-title { margin: 33px 10px 14px; color: #95acb7; font-size: 11px; letter-spacing: 1.5px; }
 .session-files { overflow-y: auto; min-height: 0; }
+.session-files { max-height: 205px; flex-shrink: 0; }
+.toolbar-actions { display: flex; gap: 10px; align-items: center; }
+.secondary { color: #326e60; background: #f2f8f5; border: 1px solid #d3e5dc; border-radius: 8px; padding: 11px 16px; font-size: 12px; white-space: nowrap; }
+.secondary:disabled { cursor: default; opacity: .45; }
+.library-bar { display: flex; gap: 16px; align-items: center; padding: 10px 32px; background: #f9fbfa; border-bottom: 1px solid #e5ece8; font-size: 11px; min-width: 0; }
+.library-bar span { color: #82948b; flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.library-bar button { font-size: 11px; color: #397764; background: none; border: 0; white-space: nowrap; padding: 4px 0; }
+.library-title { margin-top: 25px; display: flex; justify-content: space-between; }
+.library-title span { color: #c0d7ca; }
+.library-versions { overflow-y: auto; min-height: 0; max-height: 230px; }
+.saved-file { margin: 0; padding-top: 10px; padding-bottom: 10px; }
+.saved-file b { max-width: 150px; }
+.saved-file em { display: block; margin-top: 6px; color: #dbbe8b; font-size: 10px; font-style: normal; }
+.recovery-title { color: #dbbe8b; margin-top: 18px; margin-bottom: 10px; }
+.recovery-list { overflow: auto; max-height: 130px; flex-shrink: 0; }
+.recovery-card { padding: 9px; background: #304149; border-radius: 6px; margin-bottom: 6px; }
+.recovery-card span { display: block; font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.recovery-card button { font-size: 10px; background: transparent; color: #e4c898; border: 0; padding: 8px 0 0; }
+.library-warning { font-size: 11px; color: #8b764b; background: #fcf9f0; padding: 9px 32px; border-bottom: 1px solid #eee7d8; }
+.saved-location { margin-top: 20px; padding: 11px; border: 1px solid #dce9e1; border-radius: 6px; background: #f1f7f3; }
+.saved-location strong { font-size: 10px; font-weight: 500; color: #4d7b62; }
+.saved-location p { margin: 8px 0 0; font-size: 10px; line-height: 1.7; color: #83938a; overflow-wrap: anywhere; }
 .session-empty { font-size: 12px; line-height: 1.9; color: #8fa6b0; padding: 0 10px; }
 .session-file { display: flex; gap: 10px; width: 100%; border: 0; background: transparent; color: #a9bec7; text-align: left; padding: 12px 10px; border-radius: 7px; margin-bottom: 4px; }
 .session-file.selected { background: #233f49; color: #f3f7f8; }

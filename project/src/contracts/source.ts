@@ -19,3 +19,4 @@ export interface SourceDocument {
   rawText: string;
   segments: SourceSegment[];
 }
+export interface SourceSnapshot { document: SourceDocument; bytes: Uint8Array }
