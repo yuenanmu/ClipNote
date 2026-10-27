@@ -2,7 +2,7 @@ import type { SourceDocument } from './source.ts';
 export interface SourceRef { segmentId: string; startOffset: number; endOffset: number }
 export interface AnalysisProfile {
   provider: string; model: string; promptVersion: string;
-  inputCharBudget: number; outputCharBudget: number; overlapChars: number;
+  inputCharBudget: number; outputCharBudget: number; overlapChars: number; inputByteBudget?: number;
 }
 export interface AnalysisChunk { chunkId: string; index: number; core: SourceRef[]; context: SourceRef[]; request: string }
 export interface ChunkPlan { planId: string; sourceId: string; profile: AnalysisProfile; chunks: AnalysisChunk[] }

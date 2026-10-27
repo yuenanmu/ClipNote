@@ -4,6 +4,7 @@ import type { SourceDocument } from '../contracts/source.ts';
 import type { LibraryState, SavedRevision } from '../contracts/storage.ts';
 import { LibrarySidebar } from './LibrarySidebar.tsx';
 import { NotesWorkspace } from './features/reader/NotesWorkspace.tsx';
+import { ApiSettings } from './features/api/ApiSettings.tsx';
 import type { NoteEntry, ReaderDocument } from '../contracts/reader.ts';
 import type { ReaderResult } from '../contracts/desktop.ts';
 
@@ -40,6 +41,7 @@ export function App() {
   const [notice, setNotice] = useState<{ text: string; error?: boolean }>();
   const [readerDocument, setReaderDocument] = useState<ReaderDocument>();
   const [showReader, setShowReader] = useState(false);
+  const [showApi, setShowApi] = useState(false);
   const [noteEntries, setNoteEntries] = useState<NoteEntry[]>([]);
   const document = documents.find(item => item.sourceId === activeId);
   const segment = document?.segments[selected];
@@ -155,6 +157,7 @@ export function App() {
     setNotice({ text: '已定位归档来源，可核对原文与实际位置。' });
   });
 
+  if (showApi) return <ApiSettings onBack={() => setShowApi(false)} />;
   if (showReader) return <NotesWorkspace document={readerDocument} entries={noteEntries} revisions={library.revisions} busy={busy} notice={notice} onAdd={openMarkdown} onOpen={noteOpen} onRemove={noteRemove} onRelink={noteRelink} onListRefresh={() => void readerAction(async () => { await refreshNotes(); await refreshLibrary(); })} onRevision={readVersion} onBack={() => { setShowReader(false); setNotice(undefined); }} onRefresh={() => void readerAction(async () => { if (readerDocument) acceptReader(await window.clipnote.readerRefresh(readerDocument.readerId)); await refreshNotes(); })} onExternal={() => readerExternal()} onExternalLink={readerExternal} onSource={readerSource} />;
 
   return <div className="app-shell">
@@ -163,6 +166,7 @@ export function App() {
       <p className="brand-subtitle">让资料成为思路</p>
       <div className="nav-current"><Icon name="layers" size={17} />文件导入<span className="nav-dot" /></div>
       <button className="notes-nav-button" disabled={busy} onClick={enterNotes}><Icon name="file" size={17} />笔记</button>
+      <button className="notes-nav-button" disabled={busy} onClick={() => setShowApi(true)}><Icon name="shield" size={17} />API 设置</button>
       <p className="session-title">本次会话</p>
       <div className="session-files">
         {!documents.length && <p className="session-empty">导入的资料会显示在这里。<br />从一份字幕或文本开始。</p>}

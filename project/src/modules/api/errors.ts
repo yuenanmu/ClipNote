@@ -1,0 +1,3 @@
+import type { ApiErrorCode } from '../../contracts/api.ts';
+const messages: Record<ApiErrorCode, string> = { INVALID_CONFIG: '请检查服务地址、模型和预算。', KEY_REQUIRED: '请填写此服务的 API 密钥。', ENCRYPTION_UNAVAILABLE: '系统加密不可用，无法安全保存密钥。', CONFIG_DAMAGED: 'API 配置损坏，已保留原文件。', CONFIG_FAILED: 'API 配置暂时不可用。', FORBIDDEN_REQUEST: '无法执行此请求。', BUSY: '另一项 API 操作正在进行。', AUTH_FAILED: '密钥无效或未获认证，请检查配置。', PERMISSION_DENIED: '当前密钥没有访问权限。', QUOTA: '服务额度不足或请求频率受限。', NETWORK: '无法连接服务，请检查地址与网络。', CANCELLED: '请求已取消。', TRUNCATED: '服务输出被截断。', INVALID_RESPONSE: '服务未返回有效结果。' };
+export class ApiError extends Error { readonly code: ApiErrorCode; constructor(code: ApiErrorCode) { super(messages[code]); this.code = code; this.name = 'ApiError'; } }
