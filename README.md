@@ -4,7 +4,7 @@ ClipNote 是开发中的 Windows 桌面 App，目标是把视频字幕或已有�
 
 首版设计支持 SRT、VTT、TXT、MD 导入，API 与 ChatGPT 订阅两种 AI 连接，以及可选 SmartSub 来源。SmartSub 接入也属于首版交付要求；文件分析和本地阅读可独立使用。Obsidian 只是可选外部编辑器。
 
-当前已有可运行的桌面文件工作台与本地 Markdown 阅读器。可导入 SRT/VTT/TXT/MD 核对来源、选择目录归档并保留独立版本，也可直接打开 Markdown，使用可折叠标题树定位正文、主动刷新外部修改。归档笔记可回查具体来源片段。导入、归档与阅读均在本地进行，无需 AI 登录、SmartSub 或 Obsidian。未保存的会话来源关闭后清空；AI 笔记生成与安装包属于后续任务。
+当前已有文件工作台、归档版本和独立“笔记”区。可导入 SRT/VTT/TXT/MD 核对来源并保存独立版本；已有 MD 可加入持久列表，切换多个文件和归档笔记。每份笔记可切换 Markdown/Mindmap：正文保留折叠标题目录，脑图以标题和嵌套列表组织分支，支持折叠、平移缩放和节点回跳原文。原文件保持原位，移出列表只移除登记。导入、归档与阅读均在本地进行，无需 AI 登录、SmartSub 或 Obsidian；AI 笔记生成与安装包属于后续任务。
 
 已安装依赖时，在 `project/` 中执行 `npm.cmd run build`，再执行 `npm.cmd start` 即可打开窗口。首次准备与所有验证命令见 [project/README](project/README.md)；可用[合成字幕](project/tests/fixtures/示例%20字幕.srt)试用。任务授权与实际进度统一见[任务清单](docs/任务清单.md)。
 

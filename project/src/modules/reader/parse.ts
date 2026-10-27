@@ -6,6 +6,7 @@ import type { Nodes, Root } from 'mdast';
 import type { ReaderContent, ReaderHeading } from '../../contracts/reader.ts';
 import { ReaderError } from './errors.ts';
 import { externalUrl } from './links.ts';
+import { buildMindmap } from './mindmap.ts';
 export { classifyLink, externalUrl } from './links.ts';
 export const MAX_READER_BYTES = 2 * 1024 * 1024;
 const processor = unified().use(remarkParse).use(remarkFrontmatter, ['yaml', 'toml']).use(remarkGfm);
@@ -31,8 +32,9 @@ export function parseMarkdown(text: string): ReaderContent {
       while (parents.length && parents.at(-1)!.depth >= heading.depth) parents.pop();
       (parents.at(-1)?.children ?? headings).push(heading); parents.push(heading);
     }
+    node.data = { ...node.data, readerId: node.type === 'heading' ? (node.data as { id?: string })?.id : `@md-${count}` };
     if ((node.type === 'link' || node.type === 'definition') && externalUrl(node.url)) links.add(externalUrl(node.url)!);
     if ('children' in node) for (let index = node.children.length - 1; index >= 0; index--) pending.push({ node: node.children[index] as Nodes, blockIndex, level: level + 1 });
   }
-  return { root, headings, links: [...links] };
+  return { root, headings, links: [...links], mindmap: buildMindmap(root) };
 }

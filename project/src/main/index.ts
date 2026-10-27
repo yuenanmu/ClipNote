@@ -5,6 +5,7 @@ import { join, resolve, sep } from 'node:path';
 import { createImportHandler } from './import-controller.ts';
 import { createStorageHandlers } from './storage-controller.ts';
 import { createReaderHandlers } from './reader-controller.ts';
+import { NoteCatalog } from '../modules/reader/catalog.ts';
 import { readBytes } from '../modules/storage/io.ts';
 import { WorkerTasks } from './worker-tasks.ts';
 import { StorageError } from '../modules/storage/errors.ts';
@@ -83,6 +84,8 @@ app.whenReady().then(() => {
   });
   for (const [action, handler] of Object.entries(storageHandlers)) ipcMain.handle(`storage:${action}`, handler);
   const readerHandlers = createReaderHandlers({
+    catalog: new NoteCatalog(join(local, 'reader')),
+    sourcePath: sourceId => { const source = snapshots.get(sourceId)?.document; return source?.format === 'md' ? source.originalPath : undefined; },
     isTrustedSender: trusted,
     chooseFile: async () => {
       const selected = await dialog.showOpenDialog(window, { title: '打开 Markdown', properties: ['openFile'], filters: [{ name: 'Markdown', extensions: ['md'] }] });

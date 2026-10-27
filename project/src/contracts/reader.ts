@@ -4,11 +4,14 @@ declare module 'mdast' {
   interface RootContentMap { toml: Toml }
 }
 export interface ReaderHeading { id: string; title: string; depth: number; blockIndex: number; children: ReaderHeading[] }
-export interface ReaderContent { root: Root; headings: ReaderHeading[]; links: string[] }
+export interface ReaderPosition { id: string; blockIndex: number }
+export interface MindmapNode { id: string; label: string; target?: ReaderPosition; details: { text: string; target: ReaderPosition }[]; children: MindmapNode[] }
+export interface NoteEntry { noteId: string; fileName: string; filePath: string; available: boolean }
+export interface ReaderContent { root: Root; headings: ReaderHeading[]; links: string[]; mindmap: MindmapNode }
 export interface ReaderArchive { sourceId: string; revisionId: string; sourceFile: string; segmentIds: string[] }
 export interface ReaderDocument {
   readerId: string; fileName: string; filePath: string; encoding: string; checksum: string;
-  content: ReaderContent; archive?: ReaderArchive; noteModified?: boolean;
+  content: ReaderContent; archive?: ReaderArchive; noteModified?: boolean; noteId?: string;
 }
 export type ReaderTarget = { kind: 'file'; path: string } | { kind: 'revision'; sourceId: string; revisionId: string; expectedPath?: string };
 export type LoadedReader = Omit<ReaderDocument, 'readerId'>;

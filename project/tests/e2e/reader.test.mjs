@@ -17,11 +17,12 @@ test('offline Markdown reader shares anchors, refreshes safely and traces archiv
   const page = await app.firstWindow(); page.setDefaultTimeout(6000); await app.context().setOffline(true);
   const requests = [], errors = []; page.on('request', request => { if (/^https?:/.test(request.url())) requests.push(request.url()); }); page.on('pageerror', error => errors.push(error.message));
   const picker = async selected => app.evaluate(({ dialog }, value) => { dialog.showOpenDialog = async () => value ? { canceled: false, filePaths: [value] } : { canceled: true, filePaths: [] }; }, selected);
-  await page.getByRole('button', { name: '打开 Markdown', exact: true }).waitFor({ timeout: 2000 });
+  await page.getByRole('button', { name: '笔记', exact: true }).click();
   await t.test('direct open and cancellation work without AI or source import', async () => {
-    await picker(undefined); await page.getByRole('button', { name: '打开 Markdown', exact: true }).click(); await page.getByText('已取消 Markdown 选择', { exact: true }).waitFor();
-    await picker(path); await page.getByRole('button', { name: '打开 Markdown', exact: true }).click();
+    await picker(undefined); await page.getByRole('button', { name: '添加 Markdown', exact: true }).click(); await page.getByText('已取消 Markdown 选择', { exact: true }).waitFor();
+    await picker(path); await page.getByRole('button', { name: '添加 Markdown', exact: true }).click();
     await page.getByRole('heading', { name: '中文 阅读.md', exact: true }).waitFor();
+    await page.getByRole('button', { name: 'Markdown', exact: true }).click();
     assert.equal(await page.getByTestId('reader-body').getByRole('table').count(), 1);
     assert.equal(await page.getByRole('button', { name: '定位标题 元数据伪标题', exact: true }).count(), 0);
     assert.equal(await page.getByRole('button', { name: '定位标题 代码伪标题', exact: true }).count(), 0);
@@ -77,7 +78,7 @@ test('offline Markdown reader shares anchors, refreshes safely and traces archiv
     const state = await page.evaluate(() => window.clipnote.libraryState()); assert.equal(state.status, 'ok'); const saved = state.value.revisions[0];
     const opened = await page.evaluate(({ sourceId, revisionId }) => window.clipnote.openRevision(sourceId, revisionId), saved); const segmentId = opened.value.document.segments[1].segmentId;
     writeFileSync(saved.notePath, '# 已编辑的归档\n\n[实际依据](clipnote-source:' + segmentId + ')'); unlinkSync(input);
-    await page.getByRole('button', { name: /^阅读笔记 来源.srt/ }).click(); await page.getByRole('button', { name: '定位标题 已编辑的归档', exact: true }).waitFor();
+    await page.getByRole('button', { name: /^阅读笔记 来源.srt/ }).click(); await page.getByRole('button', { name: 'Markdown', exact: true }).click(); await page.getByRole('button', { name: '定位标题 已编辑的归档', exact: true }).waitFor();
     await page.getByText('此笔记已被外部修改，当前显示磁盘内容。', { exact: true }).waitFor();
     await page.getByRole('button', { name: '实际依据', exact: true }).click();
     await page.getByTestId('raw-source').locator('mark').getByText('第二条依据', { exact: true }).waitFor();

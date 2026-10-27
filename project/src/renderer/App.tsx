@@ -3,8 +3,8 @@ import type { DesktopApi } from '../contracts/desktop.ts';
 import type { SourceDocument } from '../contracts/source.ts';
 import type { LibraryState, SavedRevision } from '../contracts/storage.ts';
 import { LibrarySidebar } from './LibrarySidebar.tsx';
-import { ReaderView } from './features/reader/ReaderView.tsx';
-import type { ReaderDocument } from '../contracts/reader.ts';
+import { NotesWorkspace } from './features/reader/NotesWorkspace.tsx';
+import type { NoteEntry, ReaderDocument } from '../contracts/reader.ts';
 import type { ReaderResult } from '../contracts/desktop.ts';
 
 declare global { interface Window { clipnote: DesktopApi } }
@@ -40,6 +40,7 @@ export function App() {
   const [notice, setNotice] = useState<{ text: string; error?: boolean }>();
   const [readerDocument, setReaderDocument] = useState<ReaderDocument>();
   const [showReader, setShowReader] = useState(false);
+  const [noteEntries, setNoteEntries] = useState<NoteEntry[]>([]);
   const document = documents.find(item => item.sourceId === activeId);
   const segment = document?.segments[selected];
   const rawStart = rawPage * RAW_PREVIEW_LIMIT;
@@ -55,6 +56,11 @@ export function App() {
     const result = await window.clipnote.libraryState();
     if (result.status !== 'ok') throw new Error('Library unavailable');
     setLibrary(result.value);
+  };
+  const refreshNotes = async () => {
+    const result = await window.clipnote.noteList();
+    if (result.status === 'ok') setNoteEntries(result.value);
+    else if (result.status === 'error') setNotice({ text: result.error.message, error: true });
   };
   useEffect(() => {
     let active = true;
@@ -118,8 +124,18 @@ export function App() {
     if (result.status === 'ok') { setReaderDocument(result.value); setShowReader(true); }
     else setNotice(result.status === 'cancelled' ? { text: '已取消 Markdown 选择' } : { text: result.error.message, error: true });
   };
-  const openMarkdown = () => void readerAction(async () => acceptReader(await window.clipnote.readerOpen()));
-  const readVersion = (revision: SavedRevision) => void readerAction(async () => acceptReader(await window.clipnote.readerRevision(revision.sourceId, revision.revisionId)));
+  const openMarkdown = () => void readerAction(async () => { acceptReader(await window.clipnote.noteAdd()); await refreshNotes(); });
+  const readVersion = (revision: SavedRevision) => void readerAction(async () => { acceptReader(await window.clipnote.readerRevision(revision.sourceId, revision.revisionId)); await refreshNotes(); });
+  const noteOpen = (id: string) => void readerAction(async () => { acceptReader(await window.clipnote.noteOpen(id)); await refreshNotes(); });
+  const noteRelink = (id: string) => void readerAction(async () => { acceptReader(await window.clipnote.noteRelink(id)); await refreshNotes(); });
+  const noteRemove = (id: string) => void readerAction(async () => {
+    const result = await window.clipnote.noteRemove(id);
+    if (result.status === 'ok') { if (readerDocument?.noteId === id) setReaderDocument(undefined); setNotice({ text: '已移出笔记列表，原文件保留。' }); }
+    else if (result.status === 'error') setNotice({ text: result.error.message, error: true });
+    await refreshNotes();
+  });
+  const enterNotes = () => { setShowReader(true); void readerAction(async () => { await refreshNotes(); await refreshLibrary(); }); };
+  const noteFromSource = () => { if (document) void readerAction(async () => { acceptReader(await window.clipnote.noteSource(document.sourceId)); await refreshNotes(); }); };
   const readerExternal = (url?: string) => void readerAction(async () => {
     if (!readerDocument) return;
     const result = url ? await window.clipnote.readerLink(readerDocument.readerId, url) : await window.clipnote.readerExternal(readerDocument.readerId);
@@ -139,13 +155,14 @@ export function App() {
     setNotice({ text: '已定位归档来源，可核对原文与实际位置。' });
   });
 
-  if (showReader && readerDocument) return <ReaderView document={readerDocument} busy={busy} notice={notice} onOpen={openMarkdown} onBack={() => { setShowReader(false); setNotice(undefined); }} onRefresh={() => void readerAction(async () => acceptReader(await window.clipnote.readerRefresh(readerDocument.readerId)))} onExternal={() => readerExternal()} onExternalLink={readerExternal} onSource={readerSource} />;
+  if (showReader) return <NotesWorkspace document={readerDocument} entries={noteEntries} revisions={library.revisions} busy={busy} notice={notice} onAdd={openMarkdown} onOpen={noteOpen} onRemove={noteRemove} onRelink={noteRelink} onListRefresh={() => void readerAction(async () => { await refreshNotes(); await refreshLibrary(); })} onRevision={readVersion} onBack={() => { setShowReader(false); setNotice(undefined); }} onRefresh={() => void readerAction(async () => { if (readerDocument) acceptReader(await window.clipnote.readerRefresh(readerDocument.readerId)); await refreshNotes(); })} onExternal={() => readerExternal()} onExternalLink={readerExternal} onSource={readerSource} />;
 
   return <div className="app-shell">
     <aside className="sidebar">
       <div className="brand"><span className="brand-mark"><Icon size={21} /></span>ClipNote</div>
       <p className="brand-subtitle">让资料成为思路</p>
       <div className="nav-current"><Icon name="layers" size={17} />文件导入<span className="nav-dot" /></div>
+      <button className="notes-nav-button" disabled={busy} onClick={enterNotes}><Icon name="file" size={17} />笔记</button>
       <p className="session-title">本次会话</p>
       <div className="session-files">
         {!documents.length && <p className="session-empty">导入的资料会显示在这里。<br />从一份字幕或文本开始。</p>}
@@ -158,7 +175,7 @@ export function App() {
     </aside>
     <main className="desktop" aria-busy={busy}>
       <header className="toolbar"><div><p className="eyebrow">工作台 / 文件导入</p><h1 title={document?.fileName}>{document?.fileName ?? '文件导入'}</h1><p className="toolbar-caption">{document ? '保留来源，核对每一个片段。' : '把字幕与文本，带到同一个工作台。'}</p></div>
-        <div className="toolbar-actions"><button className="secondary" disabled={busy} onClick={openMarkdown}>打开 Markdown</button><button className="secondary" disabled={busy || !document} onClick={() => void storageAction(saveSource)}>保存来源</button><button className="primary" disabled={busy} onClick={() => void importFile()}><Icon name="plus" size={16} />{busy ? '正在处理…' : '导入文件'}</button></div>
+        <div className="toolbar-actions">{document?.format === 'md' && <button className="secondary" disabled={busy} onClick={noteFromSource}>加入笔记区</button>}<button className="secondary" disabled={busy || !document} onClick={() => void storageAction(saveSource)}>保存来源</button><button className="primary" disabled={busy} onClick={() => void importFile()}><Icon name="plus" size={16} />{busy ? '正在处理…' : '导入文件'}</button></div>
       </header>
       <div className="library-bar"><span title={library.directory ?? ''}>{library.directory ? `保存目录：${library.directory}` : '选择本地目录，归档后可在重启时重新打开。'}</span><button disabled={busy} onClick={() => void storageAction(async () => { await chooseDirectory(); })}>{library.directory ? '更改目录' : '选择保存目录'}</button></div>
       {notice && <div className={`notice ${notice.error ? 'error' : ''}`} role={notice.error ? 'alert' : 'status'}>{notice.text}</div>}
