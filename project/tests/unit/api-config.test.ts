@@ -7,7 +7,7 @@ import { ApiConfigStore } from '../../src/modules/api/config.ts';
 import { createApiHandlers } from '../../src/main/api-controller.ts';
 const secret = 'synthetic-api-key';
 const config = { baseUrl: 'https://example.invalid/v1', model: 'synthetic-model', contextWindow: 8192, maxTokens: 2048, apiKey: secret };
-const protector = { isEncryptionAvailable: () => true, encryptString: (s: string) => Buffer.from(s.split('').reverse().join('')), decryptString: (b: Buffer) => b.toString().split('').reverse().join('') };
+const protector = { isAsyncEncryptionAvailable: async () => true, encryptStringAsync: async (s: string) => Buffer.from(s.split('').reverse().join('')), decryptStringAsync: async (b: Buffer) => ({ result: b.toString().split('').reverse().join(''), shouldReEncrypt: false }) };
 async function fixture(t: test.TestContext) { const base = fileURLToPath(new URL('../../../.local/test-artifacts/', import.meta.url)); await mkdir(base, { recursive: true }); const own = await mkdtemp(join(base, 'api-config-')); t.after(async () => { assert.equal(resolve(dirname(own)), resolve(base)); await rm(own, { recursive: true, force: true }); }); return own; }
 const isCode = (code: string) => (error: any) => error?.code === code;
 
@@ -23,8 +23,16 @@ test('configuration persists encrypted key across restarts but never returns pla
 test('unsafe endpoints, credentials in URLs, invalid budgets and unavailable encryption fail safely', async t => {
   const dir = await fixture(t); const store = new ApiConfigStore(dir, protector);
   for (const patch of [{ baseUrl: 'http://example.invalid/v1' }, { baseUrl: 'https://u:p@example.invalid/v1' }, { baseUrl: 'https://example.invalid/v1?key=secret' }, { model: '' }, { contextWindow: 100 }, { maxTokens: 9000 }, { apiKey: '' }]) await assert.rejects(store.save({ ...config, ...patch }));
-  await assert.rejects(new ApiConfigStore(dir, { ...protector, isEncryptionAvailable: () => false }).save(config), isCode('ENCRYPTION_UNAVAILABLE'));
+  await assert.rejects(new ApiConfigStore(dir, { ...protector, isAsyncEncryptionAvailable: async () => false }).save(config), isCode('ENCRYPTION_UNAVAILABLE'));
   assert.equal((await store.save({ ...config, baseUrl: 'http://127.0.0.1:9876/v1' })).configured, true);
+});
+test('asynchronous protector failures are sanitized and existing encrypted configuration remains unchanged', async t => {
+  const dir = await fixture(t); const store = new ApiConfigStore(dir, protector); await store.save(config); const before = await readFile(join(dir, 'api.json'), 'utf8');
+  const unable = new ApiConfigStore(dir, { ...protector, isAsyncEncryptionAvailable: async () => { throw new Error(secret); } });
+  await assert.rejects(unable.save(config), isCode('ENCRYPTION_UNAVAILABLE')); await assert.rejects(unable.credentials(), isCode('ENCRYPTION_UNAVAILABLE'));
+  const badEncrypt = new ApiConfigStore(dir, { ...protector, encryptStringAsync: async () => { throw new Error(secret); } }); await assert.rejects(badEncrypt.save(config), isCode('ENCRYPTION_UNAVAILABLE'));
+  const badDecrypt = new ApiConfigStore(dir, { ...protector, decryptStringAsync: async () => { throw new Error(secret); } }); await assert.rejects(badDecrypt.credentials(), isCode('CONFIG_DAMAGED'));
+  assert.equal(await readFile(join(dir, 'api.json'), 'utf8'), before);
 });
 test('damaged configuration never exposes secrets or overwrites the existing file', async t => {
   const dir = await fixture(t); await writeFile(join(dir, 'api.json'), '{damaged'); const store = new ApiConfigStore(dir, protector);

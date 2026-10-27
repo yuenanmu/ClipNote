@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createServer } from 'node:http';
-import { mkdirSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { _electron as electron } from 'playwright';
@@ -38,4 +38,24 @@ test('API settings save an encrypted key and only send a synthetic test when exp
   await page.screenshot({ path: join(artifacts, 'api-settings-models.png') });
   await page.getByRole('button', { name: '测试连接', exact: true }).click(); await page.locator('.api-panel .notice').waitFor(); assert.equal(await page.locator('.api-panel .notice').innerText(), '连接测试通过');
   assert.equal(calls, 1); assert.equal(received.auth, `Bearer ${secret}`); assert.ok(JSON.stringify(received.body).includes('合成连接测试'));
+});
+
+test('legacy synchronous ciphertext remains readable with asynchronous safeStorage and new operations emit no deprecation warnings', { timeout: 120000 }, async t => {
+  const artifacts = fileURLToPath(new URL('../../../.local/test-artifacts/', import.meta.url)); mkdirSync(artifacts, { recursive: true }); const own = mkdtempSync(join(artifacts, 'api-legacy-'));
+  const secret = 'synthetic-legacy-secret'; let auth = '';
+  const server = createServer((request, response) => { auth = request.headers.authorization ?? ''; response.setHeader('Content-Type', 'application/json'); response.end(JSON.stringify({ data: [{ id: 'fixture' }] })); });
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve)); const baseUrl = `http://127.0.0.1:${server.address().port}/v1`;
+  const env = { ...process.env, CLIPNOTE_TEST_USER_DATA: join(own, 'profile') }; delete env.ELECTRON_RUN_AS_NODE; let app;
+  const launch = () => electron.launch({ executablePath: electronPath, args: [fileURLToPath(new URL('../../dist/main/index.cjs', import.meta.url))], env, timeout: 30000 });
+  t.after(async () => { if (app) await app.close(); await new Promise(resolve => { server.closeAllConnections(); server.close(resolve); }); assert.equal(resolve(dirname(own)), resolve(artifacts)); rmSync(own, { recursive: true, force: true }); });
+  // The first isolated process creates an actual pre-migration Windows ciphertext.
+  app = await launch(); const encryptedKey = await app.evaluate(({ safeStorage }, value) => safeStorage.encryptString(value).toString('base64'), secret); await app.close(); app = undefined;
+  const apiDir = join(own, 'profile', 'api'); mkdirSync(apiDir, { recursive: true }); writeFileSync(join(apiDir, 'api.json'), JSON.stringify({ version: 1, baseUrl, model: 'fixture', contextWindow: 8192, maxTokens: 2048, encryptedKey }));
+  app = await launch(); let stderr = ''; const stream = app.process().stderr; assert.ok(stream, 'Electron stderr must be observable'); stream.on('data', chunk => { stderr += chunk.toString(); });
+  const page = await app.firstWindow(); page.setDefaultTimeout(8000); await page.getByRole('button', { name: 'API 设置', exact: true }).click();
+  await page.waitForFunction(expected => document.querySelector('input[aria-label="服务地址"]')?.value === expected, baseUrl);
+  await page.getByRole('button', { name: '获取模型列表' }).click(); await page.getByLabel('选择模型').waitFor(); assert.equal(auth, `Bearer ${secret}`);
+  assert.equal(JSON.parse(readFileSync(join(apiDir, 'api.json'), 'utf8')).encryptedKey, encryptedKey);
+  await page.getByLabel('API 密钥').fill('synthetic-replacement'); await page.getByRole('button', { name: '保存设置', exact: true }).click(); await page.getByText('设置已安全保存', { exact: true }).waitFor();
+  await app.close(); app = undefined; assert.doesNotMatch(stderr, /safeStorage\.(?:isEncryptionAvailable|encryptString|decryptString).*deprecated/i);
 });
