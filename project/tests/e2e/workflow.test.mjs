@@ -17,6 +17,7 @@ test('file workflow asks before sending and saves readable independent revisions
     const parts = []; for await (const part of request) parts.push(part);
     if (fail) { response.writeHead(429, { 'Content-Type': 'application/json' }); response.end('{}'); return; }
     const body = JSON.parse(Buffer.concat(parts).toString()), data = JSON.parse(body.messages.at(-1).content.split('\n')[1]);
+    if (calls === 1) { response.writeHead(200, { 'Content-Type': 'text/event-stream' }); response.write(`data: ${JSON.stringify({ id: 'fixture', object: 'chat.completion.chunk', model: 'fixture', choices: [{ index: 0, delta: { role: 'assistant', content: '{' }, finish_reason: null }] })}\n\n`); response.write(`data: ${JSON.stringify({ id: 'fixture', object: 'chat.completion.chunk', model: 'fixture', choices: [{ index: 0, delta: {}, finish_reason: 'length' }] })}\n\n`); response.end('data: [DONE]\n\n'); return; }
     const { segmentId, startOffset, endOffset } = data.core[0], refs = [{ segmentId, startOffset, endOffset }];
     const value = JSON.stringify({ title: '整理结果', sections: [{ heading: '要点', refs, items: [{ kind: 'point', text: '测试笔记内容', refs, children: [] }] }] });
     response.writeHead(200, { 'Content-Type': 'text/event-stream' });
@@ -28,6 +29,7 @@ test('file workflow asks before sending and saves readable independent revisions
   t.after(async () => { if (app) await app.close(); await new Promise(resolve => { server.closeAllConnections(); server.close(resolve); }); assert.equal(resolve(dirname(own)), resolve(artifacts)); rmSync(own, { recursive: true, force: true }); });
   app = await electron.launch({ executablePath: electronPath, args: [fileURLToPath(new URL('../../dist/main/index.cjs', import.meta.url))], env });
   const page = await app.firstWindow(); page.setDefaultTimeout(15000);
+  const libraryState = async () => { for (let i = 0; i < 50; i++) { const result = await page.evaluate(() => window.clipnote.libraryState()); if (result.status === 'ok') return result.value; await page.waitForTimeout(100); } throw new Error('library state stayed busy'); };
   const config = await page.evaluate(input => window.clipnote.apiSave(input), { baseUrl, model: 'fixture', contextWindow: 8192, maxTokens: 2048, apiKey: secret }); assert.equal(config.status, 'ok');
   const picker = path => app.evaluate(({ dialog }, selected) => { dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [selected] }); }, path);
   await picker(input); await page.getByRole('button', { name: '导入文件', exact: true }).click(); await page.getByRole('heading', { name: 'source.txt' }).waitFor();
@@ -36,16 +38,16 @@ test('file workflow asks before sending and saves readable independent revisions
   assert.equal(calls, 0); assert.match(await page.getByRole('region', { name: '确认发送资料' }).innerText(), /fixture/);
   await page.getByRole('button', { name: '取消', exact: true }).click(); assert.equal(calls, 0);
   await page.getByRole('button', { name: 'AI 整理' }).click(); await page.getByRole('button', { name: '确认发送并整理' }).click();
-  await page.getByText('笔记整理并保存完成').waitFor(); assert.equal(calls, 1);
-  let library = (await page.evaluate(() => window.clipnote.libraryState())).value; assert.equal(library.revisions.length, 1);
+  await page.getByText('笔记整理并保存完成').waitFor(); assert.equal(calls, 3);
+  let library = await libraryState(); assert.equal(library.revisions.length, 1);
   const first = library.revisions[0]; assert.match(readFileSync(first.notePath, 'utf8'), /测试笔记内容/); assert.equal(readFileSync(first.sourcePath, 'utf8'), original);
   await page.getByRole('button', { name: '阅读生成笔记' }).click(); await page.getByRole('button', { name: 'Markdown', exact: true }).click(); await page.getByText('测试笔记内容').first().waitFor();
   await page.getByRole('button', { name: '返回文件工作台' }).click(); writeFileSync(first.notePath, '人工编辑，不能覆盖');
   await page.getByRole('button', { name: 'AI 整理' }).click(); await page.getByRole('button', { name: '确认发送并整理' }).click();
-  for (let i = 0; i < 100 && calls < 2; i++) await page.waitForTimeout(100);
+  for (let i = 0; i < 100 && calls < 4; i++) await page.waitForTimeout(100);
   await page.getByText('正在整理', { exact: false }).first().waitFor({ state: 'hidden' });
-  library = (await page.evaluate(() => window.clipnote.libraryState())).value; assert.equal(calls, 2); assert.equal(readFileSync(first.notePath, 'utf8'), '人工编辑，不能覆盖'); assert.equal(readFileSync(input, 'utf8'), original);
+  library = await libraryState(); assert.equal(calls, 4); assert.equal(readFileSync(first.notePath, 'utf8'), '人工编辑，不能覆盖'); assert.equal(readFileSync(input, 'utf8'), original);
   await page.getByText('笔记整理并保存完成').waitFor(); fail = true;
   await page.getByRole('button', { name: 'AI 整理' }).click(); await page.getByRole('button', { name: '确认发送并整理' }).click();
-  await page.getByText('整理或保存未完成').waitFor(); assert.equal(calls, 3); assert.equal((await page.evaluate(() => window.clipnote.libraryState())).value.revisions.length, 2);
+  await page.getByText('整理或保存未完成').waitFor(); assert.equal(calls, 5); assert.equal((await libraryState()).revisions.length, 2);
 });

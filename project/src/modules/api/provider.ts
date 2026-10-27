@@ -10,7 +10,7 @@ export async function analyzeWithApi(source: SourceDocument, credentials: ApiCon
   const inputCharBudget = Math.max(1000, Math.min(16000, Math.floor((credentials.contextWindow - credentials.maxTokens - 512) / 3)));
   const profile = { provider: `api:${createHash('sha256').update(credentials.baseUrl).digest('hex')}`, model: credentials.model, promptVersion: 't06-v1', inputCharBudget, outputCharBudget: 64000, overlapChars: 0, inputByteBudget: Math.min(512000, credentials.contextWindow - credentials.maxTokens - 612) };
   const adapter = createApiAdapter(credentials); let failure: ApiError | undefined;
-  try { return await analyzeSource(source, profile, async request => { try { return await adapter(request); } catch (error) { if (error instanceof ApiError) failure = error; throw error; } }, options); }
+  try { return await analyzeSource(source, profile, async request => { try { return await adapter(request); } catch (error) { if (error instanceof ApiError) failure = error; throw error; } }, { ...options, splitTruncated: true }); }
   catch (error) { if (failure && error instanceof AnalysisError && error.code === 'SERVICE_FAILED') { Object.assign(failure, { checkpoints: error.checkpoints }); throw failure; } throw error; }
 }
 export function createApiAdapter(credentials: ApiConfigInput): AnalysisAdapter {

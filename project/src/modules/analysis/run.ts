@@ -1,6 +1,6 @@
 import type { SourceDocument } from '../../contracts/source.ts';
-import type { AnalysisProfile, AnalysisAdapter, AnalysisOptions, AnalysisResult, NoteOutline, NoteItem, SourceRef, ChunkCheckpoint } from '../../contracts/analysis.ts';
-import { planAnalysis } from './plan.ts';
+import type { AnalysisProfile, AnalysisAdapter, AnalysisOptions, AnalysisResult, NoteOutline, NoteItem, SourceRef, ChunkCheckpoint, AnalysisChunk } from '../../contracts/analysis.ts';
+import { planAnalysis, ANALYSIS_INSTRUCTION } from './plan.ts';
 import { validateOutline } from './validate.ts';
 import { renderMarkdown } from './markdown.ts';
 import { AnalysisError } from './errors.ts';
@@ -29,6 +29,45 @@ export async function analyzeSource(source: SourceDocument, profile: AnalysisPro
     if (serialized.length > plan.profile.outputCharBudget) throw new AnalysisError('TOO_LARGE');
     try { return JSON.parse(serialized); } catch { throw new AnalysisError('INVALID_STRUCTURE'); }
   }
+  const segments = new Map(snapshot.segments.map(segment => [segment.segmentId, segment]));
+  function split(chunk: AnalysisChunk): AnalysisChunk[] | undefined {
+    const total = chunk.core.reduce((sum, ref) => sum + ref.endOffset - ref.startOffset, 0);
+    if (total < 2) return undefined;
+    const left: SourceRef[] = [], right: SourceRef[] = []; let remaining = Math.floor(total / 2);
+    for (const ref of chunk.core) {
+      const size = ref.endOffset - ref.startOffset;
+      if (remaining <= 0) { right.push(ref); continue; }
+      if (remaining >= size) { left.push(ref); remaining -= size; continue; }
+      let cut = ref.startOffset + remaining; const text = segments.get(ref.segmentId)!.text;
+      if (/[\uDC00-\uDFFF]/.test(text[cut]) && /[\uD800-\uDBFF]/.test(text[cut - 1])) cut--;
+      if (cut > ref.startOffset) left.push({ ...ref, endOffset: cut });
+      if (cut < ref.endOffset) right.push({ ...ref, startOffset: cut });
+      remaining = 0;
+    }
+    if (!left.length || !right.length) return undefined;
+    return [left, right].map((core, index) => {
+      const data = core.map(ref => ({ ...ref, text: segments.get(ref.segmentId)!.text.slice(ref.startOffset, ref.endOffset) }));
+      const request = ANALYSIS_INSTRUCTION + '\n' + JSON.stringify({ sourceId: snapshot.sourceId, promptVersion: plan.profile.promptVersion, core: data, context: [] });
+      return { chunkId: `${chunk.chunkId}.${index + 1}`, index: chunk.index, core, context: [], request };
+    });
+  }
+  async function analyzeChunk(chunk: AnalysisChunk, depth: number): Promise<NoteOutline> {
+    for (let repair = 0; repair <= 1; repair++) {
+      cancelled();
+      const response = await adapter({ chunk: structuredClone(chunk), profile: { ...plan.profile }, signal: options.signal, repair: repair === 1 });
+      cancelled();
+      if (response?.status === 'truncated') {
+        const children = options.splitTruncated && depth < 3 ? split(chunk) : undefined;
+        if (!children) throw new AnalysisError('TRUNCATED');
+        const outlines: NoteOutline[] = []; for (const child of children) outlines.push(await analyzeChunk(child, depth + 1));
+        return validateOutline(mergeOutlines(outlines), snapshot, chunk);
+      }
+      if (response?.status !== 'completed') throw new AnalysisError('SERVICE_FAILED');
+      try { return validateOutline(output(response.value), snapshot, chunk); }
+      catch (error) { if (!(error instanceof AnalysisError) || error.code !== 'INVALID_STRUCTURE' || repair === 1) throw error; }
+    }
+    throw new AnalysisError('INVALID_STRUCTURE');
+  }
   try {
     cancelled();
     if (options.checkpoints !== undefined && (!Array.isArray(options.checkpoints) || options.checkpoints.length > plan.chunks.length)) throw new AnalysisError('INVALID_CHECKPOINT');
@@ -39,17 +78,8 @@ export async function analyzeSource(source: SourceDocument, profile: AnalysisPro
     }
     for (const chunk of plan.chunks) {
       cancelled(); if (completed.has(chunk.chunkId)) continue;
-      let outline: NoteOutline | undefined;
-      for (let repair = 0; repair <= 1; repair++) {
-        cancelled();
-        const response = await adapter({ chunk: structuredClone(chunk), profile: { ...plan.profile }, signal: options.signal, repair: repair === 1 });
-        cancelled();
-        if (response?.status === 'truncated') throw new AnalysisError('TRUNCATED');
-        if (response?.status !== 'completed') throw new AnalysisError('SERVICE_FAILED');
-        try { outline = validateOutline(output(response.value), snapshot, chunk); break; }
-        catch (error) { if (!(error instanceof AnalysisError) || error.code !== 'INVALID_STRUCTURE' || repair === 1) throw error; }
-      }
-      const cp = { planId: plan.planId, chunkId: chunk.chunkId, outline: outline! }; completed.set(chunk.chunkId, cp);
+      const outline = await analyzeChunk(chunk, 0);
+      const cp = { planId: plan.planId, chunkId: chunk.chunkId, outline }; completed.set(chunk.chunkId, cp);
       await options.onCheckpoint?.(structuredClone(cp)); cancelled();
     }
     const all = checkpoints(); const outline = validateOutline(mergeOutlines(all.map(cp => cp.outline)), snapshot); const markdown = renderMarkdown(outline, snapshot); cancelled();

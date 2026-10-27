@@ -75,3 +75,24 @@ test('a valid response split over thousands of SSE frames remains accepted', asy
   const base = await server(t, (_req, res) => { res.writeHead(200, { 'Content-Type': 'text/event-stream' }); for (let i = 0; i < 4000; i++) res.write(`data: ${JSON.stringify({ id: 'fixture', object: 'chat.completion.chunk', model: profile.model, choices: [{ index: 0, delta: { content: 'a' }, finish_reason: null }] })}\n\n`); res.write(`data: ${JSON.stringify({ id: 'fixture', object: 'chat.completion.chunk', model: profile.model, choices: [{ index: 0, delta: {}, finish_reason: 'stop' }] })}\n\n`); res.end('data: [DONE]\n\n'); });
   const req = { chunk: { chunkId: 'test', index: 0, core: [], context: [], request: '合成' }, profile, repair: false }; const response = await createApiAdapter(credentials(base))(req); assert.equal(response.status, 'completed'); assert.equal((response.value as string).length, 4000);
 });
+test('a length-limited API response splits only that source range and retains every reference', async t => {
+  const long = parseSource(Buffer.from('原文😀'.repeat(250)), '合成.txt'); const requests: any[][] = [];
+  const base = await server(t, async (req, res) => {
+    const parts = []; for await (const part of req) parts.push(part);
+    const body = JSON.parse(Buffer.concat(parts).toString()); const input = JSON.parse(body.messages.at(-1).content.split('\n')[1]); requests.push(input.core);
+    const size = input.core.reduce((n: number, ref: any) => n + ref.text.length, 0);
+    if (size > 400) { send(res, '{', 'length'); return; }
+    const refs = input.core.map(({ segmentId, startOffset, endOffset }: any) => ({ segmentId, startOffset, endOffset }));
+    send(res, JSON.stringify({ title: '笔记', sections: [{ heading: '章节', refs, items: [{ kind: 'point', text: '要点', refs, children: [] }] }] }));
+  });
+  const value = await analyzeWithApi(long, credentials(base)); assert.ok(requests.length > 1);
+  const refs = value.outline.sections.flatMap(section => section.refs).sort((a, b) => a.startOffset - b.startOffset);
+  assert.equal(refs[0].startOffset, 0); assert.equal(refs.at(-1)?.endOffset, long.segments[0].text.length);
+  for (let i = 1; i < refs.length; i++) assert.equal(refs[i - 1].endOffset, refs[i].startOffset);
+  for (const request of requests) for (const ref of request) assert.doesNotMatch(ref.text, /[\uD800-\uDBFF]$|^[\uDC00-\uDFFF]/);
+});
+test('repeated length limits stop within a bounded number of calls and never publish partial output', async t => {
+  const long = parseSource(Buffer.from('原文'.repeat(400)), '合成.txt'); let calls = 0;
+  const base = await server(t, (_req, res) => { calls++; send(res, '{', 'length'); });
+  await assert.rejects(analyzeWithApi(long, credentials(base)), (error: any) => error.code === 'TRUNCATED'); assert.ok(calls <= 4);
+});

@@ -16,5 +16,5 @@ export interface AnalysisRequest { chunk: AnalysisChunk; profile: AnalysisProfil
 export interface ModelResult { status: 'completed' | 'truncated'; value: unknown }
 export type AnalysisAdapter = (request: AnalysisRequest) => Promise<ModelResult>;
 export interface AnalysisResult { outline: NoteOutline; markdown: string; sourceRefs: string[]; attempt: GenerationAttempt; checkpoints: ChunkCheckpoint[] }
-export interface AnalysisOptions { signal?: AbortSignal; checkpoints?: ChunkCheckpoint[]; onCheckpoint?(checkpoint: ChunkCheckpoint): void | Promise<void> }
+export interface AnalysisOptions { signal?: AbortSignal; checkpoints?: ChunkCheckpoint[]; splitTruncated?: boolean; onCheckpoint?(checkpoint: ChunkCheckpoint): void | Promise<void> }
 export type AnalysisSource = SourceDocument;
