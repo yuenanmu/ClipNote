@@ -19,6 +19,25 @@ test('pi-ai sends one configured request and the result passes actual T06 valida
   const result = await analyzeSource(source, profile, createApiAdapter(credentials(base)));
   assert.equal(count, 1); assert.equal(received.url, '/v1/chat/completions'); assert.equal(received.auth, `Bearer ${secret}`); assert.equal(received.body.model, profile.model); assert.ok(JSON.stringify(received.body).includes('合成原文')); assert.ok(result.markdown.includes('要点')); assert.ok(!JSON.stringify(result).includes(secret));
 });
+test('short reference identifiers reduce repeated model output while preserving real source links', async t => {
+  const tiny = parseSource(Buffer.from('第一段内容。\n\n第二段内容。'), '合成.txt'); let requestCore: any[] = []; let outputLength = 0, oldLength = 0;
+  const base = await server(t, async (req, res) => {
+    const parts = []; for await (const part of req) parts.push(part); const body = JSON.parse(Buffer.concat(parts).toString());
+    requestCore = JSON.parse(body.messages.at(-1).content.split('\n')[1]).core;
+    const refs = requestCore.map(({ segmentId, startOffset, endOffset }) => ({ segmentId, startOffset, endOffset }));
+    const makeOutput = (items: typeof refs) => JSON.stringify({ title: '笔记', sections: [{ heading: '章节', refs: items, items: [{ kind: 'point', text: '要点', refs: items, children: [] }] }] });
+    const output = makeOutput(refs); outputLength = output.length; oldLength = makeOutput(refs.map((ref, i) => ({ ...ref, segmentId: tiny.segments[i].segmentId }))).length; send(res, output);
+  });
+  const value = await analyzeWithApi(tiny, credentials(base));
+  assert.deepEqual(requestCore.map(ref => ref.segmentId), ['s1', 's2']);
+  assert.ok(oldLength - outputLength >= 250); assert.deepEqual(value.sourceRefs, tiny.segments.map(item => item.segmentId));
+  assert.deepEqual(value.outline.sections[0].refs.map(ref => ref.segmentId), tiny.segments.map(item => item.segmentId));
+  assert.ok(value.markdown.includes('clipnote-source:'));
+});
+test('unknown compact identifiers still fail reference validation', async t => {
+  const base = await server(t, (_req, res) => { const refs = [{ segmentId: 's999', startOffset: 0, endOffset: 1 }]; send(res, JSON.stringify({ title: '笔记', sections: [{ heading: '章节', refs, items: [{ kind: 'point', text: '要点', refs, children: [] }] }] })); });
+  await assert.rejects(analyzeWithApi(source, credentials(base)), (error: any) => error.code === 'INVALID_REFERENCE');
+});
 test('HTTP errors map to sanitized categories without retry or response body leakage', async t => {
   for (const [status, expected] of [[400,'INVALID_CONFIG'], [404,'INVALID_CONFIG'], [401,'AUTH_FAILED'], [402,'BALANCE'], [403,'PERMISSION_DENIED'], [408,'TIMEOUT'], [429,'RATE_LIMIT'], [500,'SERVER_ERROR'], [503,'SERVER_ERROR']] as const) {
     let count = 0; const base = await server(t, (_req,res) => { count++; res.writeHead(status, { 'Content-Type': 'application/json' }); res.end(JSON.stringify({ error: { message: secret } })); });

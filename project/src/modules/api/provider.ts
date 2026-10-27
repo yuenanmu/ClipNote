@@ -13,12 +13,43 @@ export async function analyzeWithApi(source: SourceDocument, credentials: ApiCon
   try { return await analyzeSource(source, profile, async request => { try { return await adapter(request); } catch (error) { if (error instanceof ApiError) failure = error; throw error; } }, { ...options, splitTruncated: true }); }
   catch (error) { if (failure && error instanceof AnalysisError && error.code === 'SERVICE_FAILED') { Object.assign(failure, { checkpoints: error.checkpoints }); throw failure; } throw error; }
 }
+function compactReferences(request: string): { prompt: string; ids: Map<string, string> } {
+  const ids = new Map<string, string>(), aliases = new Map<string, string>();
+  try {
+    const newline = request.indexOf('\n'); if (newline < 0) return { prompt: request, ids };
+    const payload = JSON.parse(request.slice(newline + 1));
+    if (!Array.isArray(payload.core) || !Array.isArray(payload.context)) return { prompt: request, ids };
+    for (const ref of [...payload.core, ...payload.context]) {
+      if (!ref || typeof ref.segmentId !== 'string') return { prompt: request, ids: new Map() };
+      let alias = aliases.get(ref.segmentId);
+      if (!alias) { alias = `s${aliases.size + 1}`; aliases.set(ref.segmentId, alias); ids.set(alias, ref.segmentId); }
+      ref.segmentId = alias;
+    }
+    return { prompt: request.slice(0, newline) + ' segmentId 是本次请求中的短标识，引用时必须原样返回。\n' + JSON.stringify(payload), ids };
+  } catch { return { prompt: request, ids: new Map() }; }
+}
+function restoreReferences(text: string, ids: Map<string, string>): unknown {
+  if (!ids.size) return text;
+  try {
+    const value: unknown = JSON.parse(text); const stack: unknown[] = [value]; let visited = 0;
+    while (stack.length) {
+      const item = stack.pop(); if (!item || typeof item !== 'object') continue;
+      if (++visited > 100000) return text;
+      if (Array.isArray(item)) { stack.push(...item); continue; }
+      const object = item as Record<string, unknown>;
+      if (typeof object.segmentId === 'string' && ids.has(object.segmentId)) object.segmentId = ids.get(object.segmentId)!;
+      for (const child of Object.values(object)) if (child && typeof child === 'object') stack.push(child);
+    }
+    return value;
+  } catch { return text; }
+}
 export function createApiAdapter(credentials: ApiConfigInput, timeoutMs = 60000): AnalysisAdapter {
   const config = { ...credentials };
   const model = { id: config.model, name: config.model, api: 'openai-completions' as const, provider: 'clipnote-api', baseUrl: config.baseUrl, reasoning: false, input: ['text' as const], cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }, contextWindow: config.contextWindow, maxTokens: config.maxTokens };
   return async request => {
     if (request.signal?.aborted) throw new ApiError('CANCELLED');
-    const prompt = request.chunk.request + (request.repair ? '\n上次结果格式错误。请仅输出符合要求的完整 JSON，不要添加代码围栏。' : '\n请仅输出完整 JSON，不要添加代码围栏。');
+    const compact = compactReferences(request.chunk.request);
+    const prompt = compact.prompt + (request.repair ? '\n上次结果格式错误。请仅输出符合要求的完整 JSON，不要添加代码围栏。' : '\n请仅输出完整 JSON，不要添加代码围栏。');
     if (Buffer.byteLength(prompt, 'utf8') > config.contextWindow - config.maxTokens - 512) throw new ApiError('INVALID_CONFIG');
     let status: number | undefined, streamFailed = false; const timeout = AbortSignal.timeout(timeoutMs);
     try {
@@ -41,7 +72,7 @@ export function createApiAdapter(credentials: ApiConfigInput, timeoutMs = 60000)
       if (response.stopReason !== 'stop') throw new ApiError(status && status >= 200 && status < 300 ? 'INVALID_RESPONSE' : 'NETWORK');
       const text = response.content.filter(part => part.type === 'text').map(part => part.text).join('').trim();
       if (!text || text.length > request.profile.outputCharBudget) throw new ApiError('INVALID_RESPONSE');
-      return { status: 'completed', value: text };
+      return { status: 'completed', value: restoreReferences(text, compact.ids) };
     } catch (error) { throw error instanceof ApiError ? error : new ApiError(request.signal?.aborted ? 'CANCELLED' : timeout.aborted ? 'TIMEOUT' : 'NETWORK'); }
   };
 }
