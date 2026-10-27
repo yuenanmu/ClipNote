@@ -5,7 +5,7 @@ declare module 'mdast' {
 }
 export interface ReaderHeading { id: string; title: string; depth: number; blockIndex: number; children: ReaderHeading[] }
 export interface ReaderPosition { id: string; blockIndex: number }
-export interface MindmapNode { id: string; label: string; target?: ReaderPosition; details: { text: string; target: ReaderPosition }[]; children: MindmapNode[] }
+export interface MindmapNode { id: string; kind: 'root' | 'heading' | 'listItem' | 'paragraph' | 'code' | 'table'; label: string; target?: ReaderPosition; children: MindmapNode[] }
 export interface NoteEntry { noteId: string; fileName: string; filePath: string; available: boolean }
 export interface ReaderContent { root: Root; headings: ReaderHeading[]; links: string[]; mindmap: MindmapNode }
 export interface ReaderArchive { sourceId: string; revisionId: string; sourceFile: string; segmentIds: string[] }

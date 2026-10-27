@@ -3,7 +3,7 @@ import type { ReactNode } from 'react';
 import type { Nodes, Definition } from 'mdast';
 import type { ReaderDocument, ReaderLink } from '../../../contracts/reader.ts';
 import { classifyLink } from '../../../modules/reader/links.ts';
-export function MarkdownBody({ document, start, end, onLink }: { document: ReaderDocument; start: number; end: number; onLink(link: ReaderLink): void }) {
+export function MarkdownBody({ document, start, end, activeId, onLink }: { document: ReaderDocument; start: number; end: number; activeId?: string; onLink(link: ReaderLink): void }) {
   const definitions = new Map<string, Definition>();
   const pending: Nodes[] = [document.content.root];
   while (pending.length) { const node = pending.pop()!; if (node.type === 'definition') definitions.set(node.identifier.toLowerCase(), node); if ('children' in node) pending.push(...node.children); }
@@ -13,21 +13,21 @@ export function MarkdownBody({ document, start, end, onLink }: { document: Reade
   };
   const render = (node: Nodes, key: string): ReactNode => {
     const id = (node.data as { readerId?: string })?.readerId;
-    const anchor = { id: `reader-${id}`, 'data-reader-anchor': id, tabIndex: -1 };
+    const anchor = { id: `reader-${id}`, 'data-reader-anchor': id, 'data-reader-active': id === activeId ? 'true' : undefined, tabIndex: -1 };
     const children = 'children' in node ? node.children.map((child, index) => render(child as Nodes, `${key}-${index}`)) : undefined;
     switch (node.type) {
       case 'text': return node.value;
       case 'paragraph': return <p key={key} {...anchor}>{children}</p>;
       case 'heading': {
         const id = (node.data as { id?: string })?.id;
-        return createElement(`h${node.depth}`, { key, id: `reader-${id}`, 'data-reader-anchor': id, tabIndex: -1 }, children);
+        return createElement(`h${node.depth}`, { key, id: `reader-${id}`, 'data-reader-anchor': id, 'data-reader-active': id === activeId ? 'true' : undefined, tabIndex: -1 }, children);
       }
       case 'strong': return <strong key={key}>{children}</strong>;
       case 'emphasis': return <em key={key}>{children}</em>;
       case 'delete': return <del key={key}>{children}</del>;
       case 'inlineCode': return <code key={key}>{node.value}</code>;
       case 'code': return <pre key={key} {...anchor}><code>{node.value}</code></pre>;
-      case 'html': return <pre className="reader-literal" key={key}>{node.value}</pre>;
+      case 'html': return <pre className="reader-literal" key={key} {...anchor}>{node.value}</pre>;
       case 'blockquote': return <blockquote key={key}>{children}</blockquote>;
       case 'list': return node.ordered ? <ol key={key} start={node.start ?? 1}>{children}</ol> : <ul key={key}>{children}</ul>;
       case 'listItem': return <li key={key} {...anchor}>{typeof node.checked === 'boolean' && <input type="checkbox" checked={node.checked} disabled aria-label={node.checked ? '已完成' : '未完成'} />}{children}</li>;

@@ -24,6 +24,8 @@
   },
   "dependencies": {
     "@earendil-works/pi-ai": "1.4.0",
+    "markmap-common": "0.18.9",
+    "markmap-view": "0.18.12",
     "react": "19.3.1",
     "react-dom": "19.3.1",
     "remark-frontmatter": "5.0.0",
