@@ -1,6 +1,6 @@
 # ClipNote 开发与验证
 
-当前包含桌面文件工作台、本地来源归档与版本保存，以及 T02 独立接入探针。桌面源码使用 TypeScript，界面采用 React；探针继续使用 Node ESM。桌面已支持四格式导入、来源片段、原文位置、长文件分页、归档版本及保存恢复；AI 分析、Markdown 阅读器和安装包尚未实现。
+当前包含桌面文件工作台、本地归档与版本保存、Markdown 阅读器，以及 T02 独立接入探针。桌面源码使用 TypeScript，界面采用 React；探针继续使用 Node ESM。已支持四格式来源、版本保存/恢复，以及独立只读 Markdown 阅读；AI 分析和安装包尚未实现。
 
 ## 打开桌面窗口
 
@@ -28,14 +28,35 @@ npm.cmd start
 
 当前开发设置和恢复草稿在 `../.local/desktop/storage/`，输出位置必须明确选择；拒绝接管没有专属标记的同名 ClipNote 目录，也拒绝管理路径中的符号链接/junction。开发时禁止选代码仓库内作为输出，已忽略的 `.local/`、`.runtime/` 子目录除外。安装包的正式数据路径由 T12 确定。
 
+## 笔记区与 Markdown / Mindmap
+
+点击左侧“笔记”，再点“添加 Markdown”选择已有 `.md`。左侧列表支持多文件切换，重启后保留登记；原文件保持原位置，不复制或改写。文件移动/删除后点“刷新笔记列表”可见“文件不可用”，用“重新关联”选择新位置。移出列表只移除登记，不删除文件。同一文件重复添加复用一个条目，最多登记1000份；登记位于开发 userData 的 `../.local/desktop/reader/notes.json`，目录损坏报错并保留原数据。
+
+笔记默认打开 Mindmap；顶部“Markdown / Mindmap / 对照”切换三种视图。左侧可切换“笔记/大纲”，大纲可折叠并定位；脑图模式会展开并定位对应章节，Markdown模式定位正文，对照模式联动两侧。长文正文每页100个根块，定位可跨页。无标题/空文档也可阅读。资料工作台导入 MD 后，可点击“加入笔记区”，无需再次选文件；阅读当前磁盘内容，来源分析快照仍保留导入时内容。
+
+脑图使用离线 Markmap，初始以100%可读比例展示章节主干。标题、嵌套列表和普通段落按原文顺序直接入图，长文字完整显示、最多760px宽自然换行；代码/表格提供紧凑入口，frontmatter不入图。圆点展开/收起，文字选中；独立脑图点击“查看原文”才切到Markdown。画布支持拖动、触控平移、滚轮/按钮缩放、恢复可读比例、章节主干和展开全部；只有主动“查看全图”才缩放适应，展开/收起或窗口变化不会重置比例。缩小时始终保留文字，不再替换成色块。
+
+“对照”让左侧Markdown、右侧脑图同时显示，默认40%/60%。拖动中间分隔条调整，两侧最少280px；键盘左右调2%、Shift左右调10%，Home/End到边界，双击恢复默认比例。最近比例跨重启保留。可收起导航获得更多空间。两栏各自滚动，点击脑图节点会定位并高亮正文且保持对照模式；切换单独/对照视图保留正文位置和脑图状态。
+
+可以添加[脑图阅读示例](tests/fixtures/脑图阅读示例.md)试用章节展开、大纲定位和双栏。正文选中高亮在焦点回到脑图后仍保留，便于对照。
+
+笔记区的“已归档笔记”直接读取所选库中各版本当前的 `note.md`，包括外部人工修改；文件工作台原有“阅读笔记”也进入这里。未来 AI 生成版本复用同一列表，当前仍只有本地归档流程。点击“查看来源”回到完整来源工作台；归档正文中的 `source.<格式>` 链接可查看该来源，`source.<格式>#<segmentId>` 或 `clipnote-source:<segmentId>` 可以定位实际片段。普通独立 MD 的任意相对文件链接不会获得读取本地文件的权限。
+
+外部编辑后点击“刷新文件”，重新读取磁盘；失败时保留旧正文并显示错误。不会自动监听或改写文件。“外部打开”只在主动点击时调用系统默认 Markdown 应用；不强制 Obsidian，不自动创建笔记库。外部程序和浏览器本身的安装/关联不由本功能配置。
+
+HTML 显示为文本，图片只显示替代说明，不自动访问远程地址或本地图片。仅正文中已登记的 HTTP(S) 链接可经主动点击交系统浏览器；脚本、data、file 等链接禁用。当前不提供内置编辑、图片加载或 Obsidian 专属库发现。
+
+阅读限制：原文件及解码后 UTF-8 内容均不超过2 MiB，AST 最多20,000节点、64层嵌套。超限明确报错，完整内容不会被静默截断。标题树和正文使用同一 AST，代码/frontmatter 内的伪标题不会出现在目录。阅读路径拒绝符号链接/junction；文件删除、路径替换或归档缺失时提示无法读取。每个窗口最多保留5个受控阅读会话，过期后重新打开即可。
+
 ## 桌面源码与检查
 
-- `src/main/`、`src/preload/`：窗口、可信主 frame 的受限导入/存储 IPC 和文件 Worker。
+- `src/main/`、`src/preload/`：窗口、可信主 frame 的受限导入/存储/阅读 IPC 和文件 Worker。
 - `src/contracts/`、`src/modules/source/`、`src/modules/storage/`：来源字节快照、解析、版本发布和恢复；存储接口接受 Markdown 与白名单元数据，供后续生成流程复用。
-- `src/renderer/`：当前会话、来源预览、归档列表与重试入口；不直接访问 Node、文件系统或凭据。
+- `src/modules/reader/`、`src/renderer/features/reader/`：Worker 读取解析，以及共用 AST 的标题树和正文；只渲染白名单 React 元素。
+- `src/renderer/`：当前会话、来源预览、归档列表、重试与阅读入口；不直接访问 Node、文件系统或凭据。
 - `npm.cmd run typecheck`：TypeScript 类型检查。
 - `npm.cmd test`：来源/桌面控制单元测试及 T02 本地集成回归；不会发真实 AI 请求。
-- `npm.cmd run test:e2e`：顺序运行 Playwright 的导入/安全/定位、归档/外部修改/重启/恢复，以及不带调试器、直接执行 `npm.cmd start` 的原生显示、重复启动、最小化、最大化、还原和关闭退出。Playwright 替换系统选择框返回值，后续 IPC/Worker/文件写入执行真实代码；普通启动回归按测试拥有的进程树发送 Windows 系统窗口命令，不调用 Playwright app.close()。无需另下浏览器，截图在 `../.local/test-artifacts/`，`npm-start-native.png` 为含系统标题栏的截图，`storage-versions.png` 为版本面板。
+- `npm.cmd run test:e2e`：顺序检查导入、归档、阅读、安全与恢复，以及不带调试器、直接执行 `npm.cmd start` 的原生显示、重复启动、最小化、最大化、还原和关闭退出。Playwright 替换系统选择框返回值，后续 IPC/Worker/文件写入执行真实代码；普通启动回归按测试拥有的进程树发送 Windows 系统窗口命令，不调用 Playwright app.close()。无需另下浏览器，截图在 `../.local/test-artifacts/`：`npm-start-native.png` 含系统标题栏，`storage-versions.png` 为版本面板，`markdown-reader.png` 为阅读界面。
 
 E2E 为每组测试创建独立 userData 和输出目录，只清理自己拥有的资源，不更改日常保存位置。内部 `CLIPNOTE_TEST_USER_DATA` 仅允许指向本项目 `.local/test-artifacts/` 内；不要在日常运行设置它。受限执行环境若阻止 Electron 访问运行时，应在获准的系统桌面运行检查，不通过关闭产品 sandbox 或修改系统 ACL 绕过。
 
@@ -47,6 +68,8 @@ E2E 为每组测试创建独立 userData 和输出目录，只清理自己拥有
 - Electron：45.0.0，实际内置 Node 24.22.0。
 - @earendil-works/pi-ai：1.4.0，声明 Node >=22.19.0。
 - React/React DOM：19.3.1；TypeScript：7.0.2；Vite：8.3.5；esbuild：0.28.2；Playwright：1.64.1。
+- Markdown：unified11.0.5、remark-parse11.0.0、remark-frontmatter5.0.0、remark-gfm4.0.1；@types/mdast4.0.4。新增依赖随清单及锁文件提交，安装禁用脚本，未升级既有运行时。
+- 脑图：markmap-view0.18.12、markmap-common0.18.9；CSS与渲染依赖本地打包，不运行外部插件/下载脚本。原 Markdown AST 继续负责结构与定位。
 - 依赖用 package-lock.json 固定；Playwright 复用项目 Electron，未下载其他浏览器。
 
 ## 本地准备

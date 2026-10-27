@@ -1,9 +1,12 @@
-import { app, BrowserWindow, dialog, ipcMain } from 'electron';
+import { app, BrowserWindow, dialog, ipcMain, shell } from 'electron';
 import type { IpcMainInvokeEvent } from 'electron';
 import { mkdirSync } from 'node:fs';
 import { join, resolve, sep } from 'node:path';
 import { createImportHandler } from './import-controller.ts';
 import { createStorageHandlers } from './storage-controller.ts';
+import { createReaderHandlers } from './reader-controller.ts';
+import { NoteCatalog } from '../modules/reader/catalog.ts';
+import { readBytes } from '../modules/storage/io.ts';
 import { WorkerTasks } from './worker-tasks.ts';
 import { StorageError } from '../modules/storage/errors.ts';
 import type { SourceDocument } from '../contracts/source.ts';
@@ -80,10 +83,24 @@ app.whenReady().then(() => {
     },
   });
   for (const [action, handler] of Object.entries(storageHandlers)) ipcMain.handle(`storage:${action}`, handler);
+  const readerHandlers = createReaderHandlers({
+    catalog: new NoteCatalog(join(local, 'reader')),
+    sourcePath: sourceId => { const source = snapshots.get(sourceId)?.document; return source?.format === 'md' ? source.originalPath : undefined; },
+    isTrustedSender: trusted,
+    chooseFile: async () => {
+      const selected = await dialog.showOpenDialog(window, { title: '打开 Markdown', properties: ['openFile'], filters: [{ name: 'Markdown', extensions: ['md'] }] });
+      return selected.canceled ? undefined : selected.filePaths[0];
+    },
+    load: target => tasks.run(join(__dirname, 'reader-worker.cjs'), { stateDir: join(local, 'storage'), target }, 'reader'),
+    openFile: async path => { await readBytes(path, 2 * 1024 * 1024); return shell.openPath(path); },
+    openLink: url => shell.openExternal(url),
+  });
+  for (const [action, handler] of Object.entries(readerHandlers)) ipcMain.handle(`reader:${action}`, handler);
   window.once('ready-to-show', () => window.show());
   window.on('closed', () => {
     ipcMain.removeHandler('source:import');
     for (const action of Object.keys(storageHandlers)) ipcMain.removeHandler(`storage:${action}`);
+    for (const action of Object.keys(readerHandlers)) ipcMain.removeHandler(`reader:${action}`);
     tasks.stop(); snapshots.clear();
   });
   void window.loadFile(join(__dirname, '../renderer/index.html'));

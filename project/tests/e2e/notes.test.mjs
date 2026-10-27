@@ -1,0 +1,95 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { mkdirSync, mkdtempSync, writeFileSync, readFileSync, renameSync, rmSync } from 'node:fs';
+import { dirname, join, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { _electron as electron } from 'playwright';
+import electronPath from 'electron';
+test('notes workspace persists file registrations and maps Markdown back to precise source blocks', { timeout: 120_000 }, async t => {
+  const base = fileURLToPath(new URL('../../../.local/test-artifacts/', import.meta.url)); mkdirSync(base, { recursive: true });
+  const own = mkdtempSync(join(base, 'notes-ui-')), path = join(own, '思维 笔记.md'), other = join(own, '另一份.md');
+  const markdown = '# 学习方法\n\n把知识整理为可回查的结构。\n\n## 先理解\n\n- 建立问题\n  - 找到证据\n\n    保留具体例子与限制。\n\n- 主动复述\n\n## 再复习\n\n- 间隔练习\n- 检查遗漏\n\n```md\n# 代码不是分支\n```';
+  writeFileSync(path, markdown); writeFileSync(other, '# 另一份笔记\n\n独立内容。');
+  const env = { ...process.env, CLIPNOTE_TEST_USER_DATA: join(own, 'profile') }; delete env.ELECTRON_RUN_AS_NODE;
+  let app, page; const errors = [], requests = [];
+  const launch = async () => {
+    app = await electron.launch({ executablePath: electronPath, args: [fileURLToPath(new URL('../../dist/main/index.cjs', import.meta.url))], env });
+    page = await app.firstWindow(); page.setDefaultTimeout(6000); await app.context().setOffline(true);
+    page.on('pageerror', error => errors.push(error.message)); page.on('request', r => { if (/^https?:/.test(r.url())) requests.push(r.url()); });
+    await page.getByRole('button', { name: '笔记', exact: true }).click();
+  };
+  const choose = selected => app.evaluate(({ dialog }, path) => { dialog.showOpenDialog = async () => path ? { canceled: false, filePaths: [path] } : { canceled: true, filePaths: [] }; }, selected);
+  t.after(async () => { if (app) await app.close(); assert.equal(resolve(dirname(own)), resolve(base)); rmSync(own, { recursive: true, force: true }); });
+  await launch();
+  await t.test('adds Markdown to a dedicated persistent list and cancels without discarding current content', async () => {
+    await choose(path); await page.getByRole('button', { name: '添加 Markdown', exact: true }).click();
+    await page.getByRole('heading', { name: '思维 笔记.md', exact: true }).waitFor();
+    await page.getByRole('button', { name: '选择节点 学习方法', exact: true }).waitFor();
+    await choose(undefined); await page.getByRole('button', { name: '添加 Markdown', exact: true }).click(); await page.getByText('已取消 Markdown 选择', { exact: true }).waitFor();
+    await choose(path); await page.getByRole('button', { name: '添加 Markdown', exact: true }).click();
+    await page.locator('main[aria-busy="false"]').waitFor();
+    assert.equal(await page.getByRole('button', { name: '打开笔记 思维 笔记.md', exact: true }).count(), 1);
+  });
+  await t.test('mindmap folds branches, exposes full paragraph nodes and explicitly jumps to a nested list item', async () => {
+    await page.getByRole('button', { name: '展开脑图 先理解', exact: true }).click();
+    assert.equal(await page.getByRole('button', { name: '选择节点 找到证据', exact: true }).count(), 0);
+    await page.getByRole('button', { name: '展开脑图 建立问题', exact: true }).click();
+    await page.getByRole('button', { name: '展开脑图 找到证据', exact: true }).click();
+    await page.getByRole('button', { name: '选择节点 保留具体例子与限制。', exact: true }).waitFor();
+    const canvas = page.getByTestId('mindmap-canvas'), rect = await canvas.boundingBox();
+    const transform = await canvas.locator(':scope > g').getAttribute('transform');
+    await page.mouse.move(rect.x + 35, rect.y + 70); await page.mouse.down(); await page.mouse.move(rect.x + 85, rect.y + 100); await page.mouse.up();
+    assert.notEqual(await canvas.locator(':scope > g').getAttribute('transform'), transform);
+    const wheelScale = await canvas.getAttribute('data-scale'); await page.mouse.wheel(0, -100);
+    await page.waitForFunction(value => document.querySelector('[data-testid="mindmap-canvas"]').getAttribute('data-scale') !== value, wheelScale);
+    const before = await page.getByTestId('mindmap-canvas').getAttribute('data-scale'); await page.getByRole('button', { name: '放大脑图', exact: true }).click();
+    await page.waitForFunction(value => document.querySelector('[data-testid="mindmap-canvas"]').getAttribute('data-scale') !== value, before);
+    assert.notEqual(await page.getByTestId('mindmap-canvas').getAttribute('data-scale'), before); await page.getByRole('button', { name: '查看全图', exact: true }).click();
+    await page.screenshot({ path: join(base, 'notes-mindmap.png') });
+    await page.getByRole('button', { name: '选择节点 找到证据', exact: true }).click();
+    await page.getByRole('button', { name: '查看原文', exact: true }).click();
+    assert.equal(await page.getByRole('button', { name: 'Markdown', exact: true }).getAttribute('aria-pressed'), 'true');
+    assert.match(await page.evaluate(() => document.activeElement?.textContent), /找到证据/);
+    assert.equal(await page.getByRole('button', { name: '定位标题 代码不是分支', exact: true }).count(), 0);
+  });
+  await t.test('switches notes and retains their registrations across a real application restart', async () => {
+    await choose(other); await page.getByRole('button', { name: '添加 Markdown', exact: true }).click(); await page.getByRole('heading', { name: '另一份.md', exact: true }).waitFor();
+    await app.close(); app = undefined; await launch();
+    await page.getByRole('button', { name: '打开笔记 思维 笔记.md', exact: true }).waitFor();
+    await page.getByRole('button', { name: '打开笔记 另一份.md', exact: true }).click(); await page.getByRole('heading', { name: '另一份.md', exact: true }).waitFor();
+  });
+  await t.test('a missing path can be relinked and removal only drops the list registration', async () => {
+    const moved = join(own, '移动之后.md'); renameSync(path, moved);
+    await page.getByRole('button', { name: '刷新笔记列表', exact: true }).click();
+    await page.getByText('文件不可用', { exact: true }).waitFor();
+    await page.getByRole('button', { name: '打开笔记 思维 笔记.md', exact: true }).click(); await page.getByRole('alert').waitFor();
+    await page.getByRole('heading', { name: '另一份.md', exact: true }).waitFor();
+    await choose(moved); await page.getByRole('button', { name: '重新关联 思维 笔记.md', exact: true }).click(); await page.getByRole('heading', { name: '移动之后.md', exact: true }).waitFor();
+    await page.getByRole('button', { name: '移出笔记列表 移动之后.md', exact: true }).click();
+    await page.getByRole('button', { name: '打开笔记 移动之后.md', exact: true }).waitFor({ state: 'detached' });
+    assert.equal(readFileSync(moved, 'utf8'), markdown); assert.equal(await page.getByRole('button', { name: '打开笔记 移动之后.md', exact: true }).count(), 0);
+  });
+  await t.test('imported MD can enter the notes workspace and repeated list nodes jump across Markdown pages', async () => {
+    await page.getByRole('button', { name: '返回文件工作台', exact: true }).click();
+    const long = join(own, '长正文.md'); writeFileSync(long, '普通段落。\n\n'.repeat(110) + '- 重复要点\n- 重复要点');
+    await choose(long); await page.getByRole('button', { name: '导入文件', exact: true }).click(); await page.getByRole('heading', { name: '长正文.md', exact: true }).waitFor();
+    await page.getByRole('button', { name: '加入笔记区', exact: true }).click(); await page.getByRole('button', { name: 'Mindmap', exact: true }).click();
+    await page.getByRole('button', { name: '查看全图', exact: true }).click();
+    await page.getByRole('button', { name: '选择节点 重复要点', exact: true }).nth(1).click();
+    await page.getByRole('button', { name: '查看原文', exact: true }).click();
+    await page.getByTestId('reader-body').getByRole('listitem').nth(1).waitFor();
+    assert.equal(await page.getByTestId('reader-body').getByRole('listitem').nth(1).evaluate(e => e === document.activeElement), true);
+    await page.screenshot({ path: join(base, 'notes-markdown.png') });
+  });
+  await t.test('large mindmaps keep text available at readable scale and in explicit full-map view', async () => {
+    const large = join(own, '大脑图.md'); writeFileSync(large, '# 大脑图\n\n' + Array.from({ length: 1800 }, (_, i) => '- 条目' + i).join('\n'));
+    await choose(large); await page.getByRole('button', { name: '添加 Markdown', exact: true }).click(); await page.getByRole('heading', { name: '大脑图.md', exact: true }).waitFor();
+    await page.getByRole('button', { name: 'Mindmap', exact: true }).click(); await page.getByRole('button', { name: '选择节点 条目1799', exact: true }).waitFor();
+    assert.equal(Number(await page.getByTestId('mindmap-canvas').getAttribute('data-scale')), 1);
+    await page.getByRole('button', { name: '查看全图', exact: true }).click();
+    assert.equal(await page.getByTestId('mindmap-canvas').locator('foreignObject').count(), 1801);
+    await page.getByRole('button', { name: '恢复可读比例', exact: true }).click();
+    await page.waitForFunction(() => Number(document.querySelector('[data-testid="mindmap-canvas"]').getAttribute('data-scale')) === 1);
+  });
+  assert.deepEqual(errors, []); assert.deepEqual(requests, []);
+});

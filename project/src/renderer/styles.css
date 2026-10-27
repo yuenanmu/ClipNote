@@ -1,4 +1,7 @@
 :root { font-family: "Segoe UI Variable", "Segoe UI", "Microsoft YaHei", sans-serif; color: #23343c; background: #f6f7f9; font-synthesis: none; text-rendering: optimizeLegibility; -webkit-font-smoothing: antialiased; }
+.saved-version { margin-bottom:10px; }
+.saved-version .saved-file { margin-bottom:0; }
+.read-version { margin:0 10px 8px; padding:5px 0; font-size:10px; color:#97c7b7; background:transparent; border:0; }
 * { box-sizing: border-box; }
 body { margin: 0; }
 button { font: inherit; cursor: pointer; }

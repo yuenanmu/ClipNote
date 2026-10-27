@@ -25,7 +25,7 @@ test('real desktop imports sources locally and preserves the security boundary',
   await t.test('shows a useful empty desktop and isolated capabilities', async () => {
     await page.getByRole('button', { name: '选择本地文件', exact: true }).waitFor();
     assert.equal(await page.evaluate(() => typeof window.require), 'undefined');
-    assert.deepEqual(await page.evaluate(() => Object.keys(window.clipnote).sort()), ['chooseLibrary','importSource','libraryState','openRevision','resumeSave','saveSource'].sort());
+    assert.deepEqual(await page.evaluate(() => Object.keys(window.clipnote).sort()), ['chooseLibrary','importSource','libraryState','openRevision','resumeSave','saveSource','readerOpen','readerRevision','readerRefresh','readerExternal','readerLink','noteList','noteAdd','noteOpen','noteRemove','noteRelink','noteSource'].sort());
     const preferences = await app.evaluate(({ BrowserWindow }) => { const prefs = BrowserWindow.getAllWindows()[0].webContents.getLastWebPreferences(); return { sandbox: prefs.sandbox, contextIsolation: prefs.contextIsolation, nodeIntegration: prefs.nodeIntegration }; });
     assert.deepEqual(preferences, { sandbox: true, contextIsolation: true, nodeIntegration: false });
     await page.screenshot({ path: join(artifacts, 'desktop-empty.png') });
