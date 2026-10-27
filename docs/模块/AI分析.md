@@ -26,7 +26,7 @@ T06 输出适配通用 Mindmap：标题表示章节，嵌套列表表达论点/�
 ## 当前纯核心接口
 
 - `planAnalysis(source, profile): ChunkPlan`：来源片段边界优先，超长单段按片段内 UTF-16 半开范围拆分，不切开代理对。core 完整连续覆盖来源片段，context 为有限前文；请求仅包含片段数据，不包含本地原路径。计划哈希覆盖来源内容、范围、服务/模型/提示词及预算，输入变化使旧检查点失效。
-- `AnalysisProfile`：provider/model/promptVersion 与 inputCharBudget/outputCharBudget/overlapChars；建议默认16,000/64,000/400字符，字符预算不是 token 预算。输入可配1,000～128,000字符，输出1,000～512,000字符，重叠不超过输入的四分之一。实际 JSON 序列化请求必须在输入预算内；真实适配器另校模型上下文和输出 token 限制。
+- `AnalysisProfile`：provider/model/promptVersion 与 inputCharBudget/outputCharBudget/overlapChars，以及可选 inputByteBudget；字符预算不是 token 预算。输入可配1,000～128,000字符，输出1,000～512,000字符，重叠不超过输入的四分之一。实际序列化请求必须同时满足字符与（如有）UTF-8字节预算。API适配器当前为避免字节预算与重叠竞争使用零重叠，仍完整覆盖来源；真实服务另需核对模型上下文和token限制。
 - `validateOutline(value, source, chunk?)`：只接受 title/sections，每章 heading/refs/items，实质条目 kind/text/refs/children；kind 为 summary/point/support/example/limitation。章节、父项和叶子均需来源引用；引用为 segmentId/startOffset/endOffset，不能越过片段或本次 core/context 实际提供的范围，不接受模型生成时间。
 - `analyzeSource(source, profile, adapter, options?)`：串行调用注入的异步适配器，返回 outline/markdown/sourceRefs/attempt/checkpoints。适配器显式返回 completed/truncated；仅 completed 的格式/结构问题允许最多一次 repair，引用、截断、服务失败不自动换服务。signal 传入调用，调用前后检查；取消后迟到的结果不发布。
 - 检查点包含 planId/chunkId/已校验 outline。失败携带已完成检查点，显式重试可传回；拒绝外来/重复/过期检查点并再次校验范围。回调收到副本。核心不落盘，T09/T11 再实现任务与持久恢复，不能把内存恢复宣称为跨重启恢复。
@@ -41,6 +41,10 @@ API 地址/模型/密钥可配置；首版优先 OpenAI 兼容通路，其他协
 服务类型已确认，不要求用户先研究账号资格。登录、权限、配额和真实文本请求由后续程序验证；需要人工时仅完成正常登录或 App 内配置。库文档证明有能力，不能代替 Electron 内实际请求。
 
 API 与订阅分别配置和验收，参数差异由适配层处理。失败暂停，手动切换服务创建新尝试，来源可复用；不同尝试结果保留明确归属，不暗中换服务或扩大费用。
+
+T07新增 `src/modules/api/`：`ApiConfigStore` 经系统加密保存密钥，`createApiAdapter` 用 pi-ai OpenAI Chat Completions发起单块请求，`analyzeWithApi` 注入 T06并将服务地址哈希纳入计划归属。禁用自动重试与重定向，固定错误类别；传输响应最多4 MiB并约束最终文本大小。输入按配置的上下文窗口、输出上限、协议余量和实际UTF-8请求大小作保守限制，但无法保证任意模型tokenizer完全一致。部分兼容服务不支持SDK默认请求参数，真实兼容性待验。当前T07有设置与显式合成连接测试，文件到笔记UI留T09；检查点仍仅内存保存。
+
+API设置新增主动模型发现：向用户指定地址发送认证GET /models，不发送来源文本，允许用户选择返回的模型ID或手动输入。只对同一已保存地址复用其已保存密钥，更换地址清空未保存输入；请求不跟随重定向。HTTP402与429分别提示余额及频率/网关限制，具体服务可能有自己的含义，不以429断言余额不足。
 
 ## 错误与验收重点
 

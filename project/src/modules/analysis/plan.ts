@@ -15,11 +15,13 @@ export function checkSource(source: SourceDocument): void {
 export function planAnalysis(source: SourceDocument, profile: AnalysisProfile): ChunkPlan {
   checkSource(source);
   if (!profile || ![profile.provider, profile.model, profile.promptVersion].every(v => typeof v === 'string' && v.trim().length > 0 && v.length <= 128 && !/[\x00-\x1f]/.test(v)) || !Number.isSafeInteger(profile.inputCharBudget) || profile.inputCharBudget < 1000 || profile.inputCharBudget > 128000 || !Number.isSafeInteger(profile.outputCharBudget) || profile.outputCharBudget < 1000 || profile.outputCharBudget > 512000 || !Number.isSafeInteger(profile.overlapChars) || profile.overlapChars < 0 || profile.overlapChars > Math.floor(profile.inputCharBudget / 4)) throw new AnalysisError('INVALID_PROFILE');
-  const fixed = { provider: profile.provider, model: profile.model, promptVersion: profile.promptVersion, inputCharBudget: profile.inputCharBudget, outputCharBudget: profile.outputCharBudget, overlapChars: profile.overlapChars };
+  if (profile.inputByteBudget !== undefined && (!Number.isSafeInteger(profile.inputByteBudget) || profile.inputByteBudget < 1000 || profile.inputByteBudget > 512000)) throw new AnalysisError('INVALID_PROFILE');
+  const fixed = { provider: profile.provider, model: profile.model, promptVersion: profile.promptVersion, inputCharBudget: profile.inputCharBudget, outputCharBudget: profile.outputCharBudget, overlapChars: profile.overlapChars, ...(profile.inputByteBudget === undefined ? {} : { inputByteBudget: profile.inputByteBudget }) };
   const planId = createHash('sha256').update(JSON.stringify([source.sourceId, source.checksum, source.segments, fixed])).digest('hex');
   const lookup = new Map(source.segments.map(s => [s.segmentId, s]));
   const data = (refs: SourceRef[]) => refs.map(r => ({ ...r, text: lookup.get(r.segmentId)!.text.slice(r.startOffset, r.endOffset) }));
   const request = (core: SourceRef[], context: SourceRef[]) => ANALYSIS_INSTRUCTION + '\n' + JSON.stringify({ sourceId: source.sourceId, promptVersion: fixed.promptVersion, core: data(core), context: data(context) });
+  const fits = (core: SourceRef[], context: SourceRef[]) => { const value = request(core, context); return value.length <= fixed.inputCharBudget && (fixed.inputByteBudget === undefined || Buffer.byteLength(value, 'utf8') <= fixed.inputByteBudget); };
   const chunks: AnalysisChunk[] = []; let index = 0, offset = 0;
   while (index < source.segments.length) {
     if (chunks.length >= 1000) throw new AnalysisError('TOO_LARGE');
@@ -37,10 +39,10 @@ export function planAnalysis(source: SourceDocument, profile: AnalysisProfile): 
     const core: SourceRef[] = [];
     while (index < source.segments.length) {
       const s = source.segments[index]; const whole = { segmentId: s.segmentId, startOffset: offset, endOffset: s.text.length };
-      if (s.text.length - offset <= fixed.inputCharBudget && request([...core, whole], context).length <= fixed.inputCharBudget) { core.push(whole); index++; offset = 0; continue; }
+      if (s.text.length - offset <= fixed.inputCharBudget && fits([...core, whole], context)) { core.push(whole); index++; offset = 0; continue; }
       if (core.length) break; // Prefer an intact semantic segment in the next chunk.
       let low = 0, high = Math.min(s.text.length - offset, fixed.inputCharBudget);
-      while (low < high) { const mid = Math.ceil((low + high) / 2); if (request([{ ...whole, endOffset: offset + mid }], context).length <= fixed.inputCharBudget) low = mid; else high = mid - 1; }
+      while (low < high) { const mid = Math.ceil((low + high) / 2); if (fits([{ ...whole, endOffset: offset + mid }], context)) low = mid; else high = mid - 1; }
       let end = offset + low;
       if (end < s.text.length && /[\uDC00-\uDFFF]/.test(s.text[end]) && /[\uD800-\uDBFF]/.test(s.text[end - 1])) end--;
       if (end <= offset) throw new AnalysisError('INVALID_PROFILE');

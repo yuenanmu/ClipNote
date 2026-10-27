@@ -1,10 +1,18 @@
-import { app, BrowserWindow, dialog, ipcMain, shell } from 'electron';
+import { app, BrowserWindow, dialog, ipcMain, shell, safeStorage } from 'electron';
 import type { IpcMainInvokeEvent } from 'electron';
 import { mkdirSync } from 'node:fs';
 import { join, resolve, sep } from 'node:path';
 import { createImportHandler } from './import-controller.ts';
 import { createStorageHandlers } from './storage-controller.ts';
 import { createReaderHandlers } from './reader-controller.ts';
+import { createApiHandlers } from './api-controller.ts';
+import { ApiConfigStore, normalizeBaseUrl } from '../modules/api/config.ts';
+import { listModels, resolveModelKey } from '../modules/api/models.ts';
+import { createApiAdapter } from '../modules/api/provider.ts';
+import { ApiError } from '../modules/api/errors.ts';
+import { parseSource } from '../modules/source/parser.ts';
+import { planAnalysis } from '../modules/analysis/plan.ts';
+import { validateOutline } from '../modules/analysis/validate.ts';
 import { NoteCatalog } from '../modules/reader/catalog.ts';
 import { readBytes } from '../modules/storage/io.ts';
 import { WorkerTasks } from './worker-tasks.ts';
@@ -96,11 +104,26 @@ app.whenReady().then(() => {
     openLink: url => shell.openExternal(url),
   });
   for (const [action, handler] of Object.entries(readerHandlers)) ipcMain.handle(`reader:${action}`, handler);
+  const apiStore = new ApiConfigStore(join(local, 'api'), safeStorage);
+  const apiHandlers = createApiHandlers({ isTrustedSender: trusted, store: apiStore, models: async (input, signal) => {
+    const baseUrl = normalizeBaseUrl(input.baseUrl); const key = await resolveModelKey(apiStore, baseUrl, input.apiKey);
+    return listModels(baseUrl, key, signal);
+  }, test: async signal => {
+    const credentials = await apiStore.credentials();
+    const source = parseSource(Buffer.from('ClipNote 合成连接测试。'), '测试.txt');
+    const profile = { provider: 'api', model: credentials.model, promptVersion: 't06-v1', inputCharBudget: 2000, outputCharBudget: 64000, overlapChars: 0 };
+    const chunk = planAnalysis(source, profile).chunks[0];
+    const result = await createApiAdapter(credentials)({ chunk, profile, signal, repair: false });
+    if (result.status === 'truncated') throw new ApiError('TRUNCATED');
+    try { validateOutline(typeof result.value === 'string' ? JSON.parse(result.value) : result.value, source, chunk); } catch { throw new ApiError('INVALID_RESPONSE'); }
+  } });
+  for (const [action, handler] of Object.entries(apiHandlers)) ipcMain.handle(`api:${action}`, handler);
   window.once('ready-to-show', () => window.show());
   window.on('closed', () => {
     ipcMain.removeHandler('source:import');
     for (const action of Object.keys(storageHandlers)) ipcMain.removeHandler(`storage:${action}`);
     for (const action of Object.keys(readerHandlers)) ipcMain.removeHandler(`reader:${action}`);
+    for (const action of Object.keys(apiHandlers)) ipcMain.removeHandler(`api:${action}`);
     tasks.stop(); snapshots.clear();
   });
   void window.loadFile(join(__dirname, '../renderer/index.html'));

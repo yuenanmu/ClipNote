@@ -4,11 +4,17 @@ import type { LibraryState, SavedRevision } from './storage.ts';
 import type { StorageErrorCode } from '../modules/storage/errors.ts';
 import type { NoteEntry, ReaderDocument } from './reader.ts';
 import type { ReaderErrorCode } from '../modules/reader/errors.ts';
+import type { ApiConfigInput, ApiResult, ApiState } from './api.ts';
 export type ReaderResult<T> = { status: 'ok'; value: T } | { status: 'cancelled' } | { status: 'error'; error: { code: ReaderErrorCode; message: string } };
 export type ImportErrorCode = SourceErrorCode | 'IMPORT_BUSY' | 'FORBIDDEN_REQUEST' | 'IMPORT_FAILED';
 export type ImportResult = { status: 'imported'; document: SourceDocument } | { status: 'cancelled' } | { status: 'error'; error: { code: ImportErrorCode; message: string } };
 export type StorageResult<T> = { status: 'ok'; value: T } | { status: 'cancelled' } | { status: 'error'; error: { code: StorageErrorCode | 'FORBIDDEN_REQUEST' | 'STORAGE_BUSY'; message: string; draftId?: string } };
 export interface DesktopApi {
+  apiState(): Promise<ApiResult<ApiState>>;
+  apiSave(input: ApiConfigInput): Promise<ApiResult<ApiState>>;
+  apiTest(): Promise<ApiResult<null>>;
+  apiModels(input: { baseUrl: string; apiKey: string }): Promise<ApiResult<string[]>>;
+  apiCancel(): Promise<ApiResult<null>>;
   noteList(): Promise<ReaderResult<NoteEntry[]>>;
   noteAdd(): Promise<ReaderResult<ReaderDocument>>;
   noteOpen(noteId: string): Promise<ReaderResult<ReaderDocument>>;
