@@ -1,0 +1,31 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { mkdir, mkdtemp, rm, readFile, writeFile } from 'node:fs/promises';
+import { dirname, join, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { analyzeSource } from '../../src/modules/analysis/run.ts';
+import { parseSource } from '../../src/modules/source/parser.ts';
+import { StorageService } from '../../src/modules/storage/service.ts';
+import { loadReader } from '../../src/modules/reader/load.ts';
+import { classifyLink } from '../../src/modules/reader/links.ts';
+import type { MindmapNode } from '../../src/contracts/reader.ts';
+
+test('synthetic analysis archives real source bytes, reopens independently and maps every generated source link and mindmap target', async t => {
+  const base = fileURLToPath(new URL('../../../.local/test-artifacts/', import.meta.url)); await mkdir(base, { recursive: true });
+  const own = await mkdtemp(join(base, 'analysis-')); t.after(async () => { assert.equal(resolve(dirname(own)), resolve(base)); await rm(own, { recursive: true, force: true }); });
+  const bytes = Buffer.from('1\r\n00:00:01,230 --> 00:00:04,560\r\n合成论点及例子\r\n\r\n2\r\n00:00:05,000 --> 00:00:08,000\r\n合成限制');
+  const document = parseSource(bytes, join(own, '从未创建的原文件.srt'));
+  const result = await analyzeSource(document, { provider: 'synthetic', model: 'fixture', promptVersion: 't06-v1', inputCharBudget: 16000, outputCharBudget: 64000, overlapChars: 400 }, async r => ({ status: 'completed', value: { title: '公开合成笔记', sections: r.chunk.core.map(ref => ({ heading: '章节', refs: [ref], items: [{ kind: 'point', text: '论点', refs: [ref], children: [{ kind: 'example', text: '具体例子', refs: [ref], children: [] }, { kind: 'limitation', text: '限制', refs: [ref], children: [] }] }] })) } }));
+  const state = join(own, 'state'); const store = new StorageService(state); await store.chooseDirectory(own);
+  const revision = await store.save({ document, bytes }, result.markdown, { kind: 'generated-note', provider: result.attempt.provider, model: result.attempt.model, promptVersion: result.attempt.promptVersion, sourceRefs: result.sourceRefs });
+  assert.deepEqual(await readFile(revision.sourcePath), bytes);
+  const reader = await loadReader({ kind: 'revision', sourceId: revision.sourceId, revisionId: revision.revisionId }, state);
+  assert.ok(reader.archive); assert.equal(reader.noteModified, false);
+  const links: string[] = []; const positions = new Set<string>();
+  const visit = (node: any) => { if (node.type === 'link') links.push(node.url); if (node.data?.readerId) positions.add(node.data.readerId); for (const child of node.children ?? []) visit(child); }; visit(reader.content.root);
+  assert.ok(links.length > 0); const referenced = new Set(links.map(link => { const target = classifyLink(link, reader.content, reader.archive); assert.equal(target.kind, 'source'); return target.kind === 'source' ? target.segmentId : ''; }));
+  assert.deepEqual([...referenced].sort(), result.sourceRefs.slice().sort());
+  const map = (node: MindmapNode) => { if (node.target) assert.ok(positions.has(node.target.id)); node.children.forEach(map); }; map(reader.content.mindmap);
+  await writeFile(revision.notePath, '# 人工编辑\n'); const next = await store.save({ document, bytes }, result.markdown, { kind: 'generated-note', sourceRefs: result.sourceRefs });
+  assert.notEqual(next.revisionId, revision.revisionId); assert.equal(await readFile(revision.notePath, 'utf8'), '# 人工编辑\n');
+});
