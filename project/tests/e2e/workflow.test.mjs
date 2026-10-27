@@ -15,7 +15,7 @@ test('file workflow asks before sending and saves readable independent revisions
   const server = createServer(async (request, response) => {
     calls++; assert.equal(request.headers.authorization, `Bearer ${secret}`);
     const parts = []; for await (const part of request) parts.push(part);
-    if (fail) { response.writeHead(429, { 'Content-Type': 'application/json' }); response.end('{}'); return; }
+    if (fail) { response.writeHead(503, { 'Content-Type': 'application/json' }); response.end('{}'); return; }
     const body = JSON.parse(Buffer.concat(parts).toString()), data = JSON.parse(body.messages.at(-1).content.split('\n')[1]);
     if (calls === 1) { response.writeHead(200, { 'Content-Type': 'text/event-stream' }); response.write(`data: ${JSON.stringify({ id: 'fixture', object: 'chat.completion.chunk', model: 'fixture', choices: [{ index: 0, delta: { role: 'assistant', content: '{' }, finish_reason: null }] })}\n\n`); response.write(`data: ${JSON.stringify({ id: 'fixture', object: 'chat.completion.chunk', model: 'fixture', choices: [{ index: 0, delta: {}, finish_reason: 'length' }] })}\n\n`); response.end('data: [DONE]\n\n'); return; }
     const { segmentId, startOffset, endOffset } = data.core[0], refs = [{ segmentId, startOffset, endOffset }];
@@ -49,5 +49,5 @@ test('file workflow asks before sending and saves readable independent revisions
   library = await libraryState(); assert.equal(calls, 4); assert.equal(readFileSync(first.notePath, 'utf8'), '人工编辑，不能覆盖'); assert.equal(readFileSync(input, 'utf8'), original);
   await page.getByText('笔记整理并保存完成').waitFor(); fail = true;
   await page.getByRole('button', { name: 'AI 整理' }).click(); await page.getByRole('button', { name: '确认发送并整理' }).click();
-  await page.getByText('整理或保存未完成').waitFor(); assert.equal(calls, 5); assert.equal((await libraryState()).revisions.length, 2);
+  await page.getByText('整理或保存未完成').waitFor(); await page.getByText('服务返回服务器错误，请检查服务状态或稍后重试。').waitFor(); assert.equal(calls, 5); assert.equal((await libraryState()).revisions.length, 2);
 });
