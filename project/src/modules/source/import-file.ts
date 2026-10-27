@@ -1,8 +1,8 @@
 import { open } from 'node:fs/promises';
-import type { SourceDocument } from '../../contracts/source.ts';
+import type { SourceDocument, SourceSnapshot } from '../../contracts/source.ts';
 import { MAX_FILE_BYTES, parseSource } from './parser.ts';
 import { SourceImportError } from './errors.ts';
-export async function importSourceFile(filePath: string): Promise<SourceDocument> {
+export async function importSourceSnapshot(filePath: string): Promise<SourceSnapshot> {
   try {
     const file = await open(filePath, 'r');
     try {
@@ -19,10 +19,12 @@ export async function importSourceFile(filePath: string): Promise<SourceDocument
         if (total > MAX_FILE_BYTES) throw new SourceImportError('FILE_TOO_LARGE');
         parts.push(part.subarray(0, bytesRead));
       }
-      return parseSource(Buffer.concat(parts, total), filePath);
+      const bytes = Buffer.concat(parts, total);
+      return { document: parseSource(bytes, filePath), bytes };
     } finally { await file.close(); }
   } catch (error) {
     if (error instanceof SourceImportError) throw error;
     throw new SourceImportError('FILE_UNREADABLE');
   }
 }
+export async function importSourceFile(filePath: string): Promise<SourceDocument> { return (await importSourceSnapshot(filePath)).document; }

@@ -10,7 +10,7 @@ test('real desktop imports sources locally and preserves the security boundary',
   const artifacts = fileURLToPath(new URL('../../../.local/test-artifacts/', import.meta.url));
   mkdirSync(artifacts, { recursive: true });
   const own = mkdtempSync(join(artifacts, 'desktop-'));
-  const env = { ...process.env }; delete env.ELECTRON_RUN_AS_NODE;
+  const env = { ...process.env, CLIPNOTE_TEST_USER_DATA: join(own, 'profile') }; delete env.ELECTRON_RUN_AS_NODE;
   const app = await electron.launch({ executablePath: electronPath, args: [fileURLToPath(new URL('../../dist/main/index.cjs', import.meta.url))], env, timeout: 30_000 });
   t.after(async () => { await app.close(); assert.equal(resolve(dirname(own)), resolve(artifacts)); rmSync(own, { recursive: true, force: true }); });
   const page = await app.firstWindow();
@@ -25,7 +25,7 @@ test('real desktop imports sources locally and preserves the security boundary',
   await t.test('shows a useful empty desktop and isolated capabilities', async () => {
     await page.getByRole('button', { name: '选择本地文件', exact: true }).waitFor();
     assert.equal(await page.evaluate(() => typeof window.require), 'undefined');
-    assert.deepEqual(await page.evaluate(() => Object.keys(window.clipnote)), ['importSource']);
+    assert.deepEqual(await page.evaluate(() => Object.keys(window.clipnote).sort()), ['chooseLibrary','importSource','libraryState','openRevision','resumeSave','saveSource'].sort());
     const preferences = await app.evaluate(({ BrowserWindow }) => { const prefs = BrowserWindow.getAllWindows()[0].webContents.getLastWebPreferences(); return { sandbox: prefs.sandbox, contextIsolation: prefs.contextIsolation, nodeIntegration: prefs.nodeIntegration }; });
     assert.deepEqual(preferences, { sandbox: true, contextIsolation: true, nodeIntegration: false });
     await page.screenshot({ path: join(artifacts, 'desktop-empty.png') });
