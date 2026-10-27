@@ -3,6 +3,9 @@ import type { DesktopApi } from '../contracts/desktop.ts';
 import type { SourceDocument } from '../contracts/source.ts';
 import type { LibraryState, SavedRevision } from '../contracts/storage.ts';
 import { LibrarySidebar } from './LibrarySidebar.tsx';
+import { ReaderView } from './features/reader/ReaderView.tsx';
+import type { ReaderDocument } from '../contracts/reader.ts';
+import type { ReaderResult } from '../contracts/desktop.ts';
 
 declare global { interface Window { clipnote: DesktopApi } }
 const PAGE_SIZE = 100;
@@ -35,6 +38,8 @@ export function App() {
   const [library, setLibrary] = useState<LibraryState>({ directory: null, revisions: [], drafts: [], warnings: [] });
   const [savedVersion, setSavedVersion] = useState<SavedRevision>();
   const [notice, setNotice] = useState<{ text: string; error?: boolean }>();
+  const [readerDocument, setReaderDocument] = useState<ReaderDocument>();
+  const [showReader, setShowReader] = useState(false);
   const document = documents.find(item => item.sourceId === activeId);
   const segment = document?.segments[selected];
   const rawStart = rawPage * RAW_PREVIEW_LIMIT;
@@ -44,7 +49,7 @@ export function App() {
   useEffect(() => { if (view === 'raw') rawMark.current?.scrollIntoView({ block: 'center' }); }, [view, selected, rawPage, activeId]);
   const openOriginal = () => { setRawPage(Math.floor((segment?.range.startOffset ?? 0) / RAW_PREVIEW_LIMIT)); setView('raw'); };
 
-  const selectDocument = (source: SourceDocument) => { setActiveId(source.sourceId); setSelected(0); setPage(0); setRawPage(0); setView('segments'); setNotice(undefined); setSavedVersion(undefined); };
+  const selectDocument = (source: SourceDocument) => { setShowReader(false); setActiveId(source.sourceId); setSelected(0); setPage(0); setRawPage(0); setView('segments'); setNotice(undefined); setSavedVersion(undefined); };
   const addDocument = (source: SourceDocument) => { setDocuments(previous => [source, ...previous.filter(item => item.sourceId !== source.sourceId)].slice(0, 5)); selectDocument(source); };
   const refreshLibrary = async () => {
     const result = await window.clipnote.libraryState();
@@ -104,6 +109,38 @@ export function App() {
     finally { setBusy(false); }
   };
 
+  const readerAction = async (action: () => Promise<void>) => {
+    if (busy) return; setBusy(true); setNotice(undefined);
+    try { await action(); } catch { setNotice({ text: '阅读操作暂时不可用，请重试。', error: true }); }
+    finally { setBusy(false); }
+  };
+  const acceptReader = (result: ReaderResult<ReaderDocument>) => {
+    if (result.status === 'ok') { setReaderDocument(result.value); setShowReader(true); }
+    else setNotice(result.status === 'cancelled' ? { text: '已取消 Markdown 选择' } : { text: result.error.message, error: true });
+  };
+  const openMarkdown = () => void readerAction(async () => acceptReader(await window.clipnote.readerOpen()));
+  const readVersion = (revision: SavedRevision) => void readerAction(async () => acceptReader(await window.clipnote.readerRevision(revision.sourceId, revision.revisionId)));
+  const readerExternal = (url?: string) => void readerAction(async () => {
+    if (!readerDocument) return;
+    const result = url ? await window.clipnote.readerLink(readerDocument.readerId, url) : await window.clipnote.readerExternal(readerDocument.readerId);
+    if (result.status === 'error') setNotice({ text: result.error.message, error: true });
+  });
+  const readerSource = (segmentId?: string) => void readerAction(async () => {
+    if (!readerDocument?.archive) return;
+    const { sourceId, revisionId } = readerDocument.archive;
+    const result = await window.clipnote.openRevision(sourceId, revisionId);
+    if (result.status === 'error') { setNotice({ text: result.error.message, error: true }); return; }
+    if (result.status !== 'ok') return;
+    const source = result.value.document, index = segmentId ? source.segments.findIndex(item => item.segmentId === segmentId) : 0;
+    if (index < 0) { setNotice({ text: '来源引用不存在，已保留当前阅读。', error: true }); return; }
+    addDocument(source); setSavedVersion(result.value.revision);
+    setSelected(index); setPage(Math.floor(index / PAGE_SIZE));
+    if (segmentId) { setRawPage(Math.floor(source.segments[index].range.startOffset / RAW_PREVIEW_LIMIT)); setView('raw'); }
+    setNotice({ text: '已定位归档来源，可核对原文与实际位置。' });
+  });
+
+  if (showReader && readerDocument) return <ReaderView document={readerDocument} busy={busy} notice={notice} onOpen={openMarkdown} onBack={() => { setShowReader(false); setNotice(undefined); }} onRefresh={() => void readerAction(async () => acceptReader(await window.clipnote.readerRefresh(readerDocument.readerId)))} onExternal={() => readerExternal()} onExternalLink={readerExternal} onSource={readerSource} />;
+
   return <div className="app-shell">
     <aside className="sidebar">
       <div className="brand"><span className="brand-mark"><Icon size={21} /></span>ClipNote</div>
@@ -116,12 +153,12 @@ export function App() {
           <Icon size={16} /><span><b>{source.fileName}</b><small>{source.format.toUpperCase()} · {source.segments.length} 个片段</small></span>
         </button>)}
       </div>
-      <LibrarySidebar library={library} busy={busy} onOpen={revision => void storageAction(() => openVersion(revision))} onResume={draftId => void storageAction(() => resume(draftId))} />
+      <LibrarySidebar library={library} busy={busy} onOpen={revision => void storageAction(() => openVersion(revision))} onRead={readVersion} onResume={draftId => void storageAction(() => resume(draftId))} />
       <footer className="sidebar-footer"><div className="local-status"><i />本地工作台</div><p>未保存资料关闭后清空。<br />已归档版本可重新打开。</p></footer>
     </aside>
     <main className="desktop" aria-busy={busy}>
       <header className="toolbar"><div><p className="eyebrow">工作台 / 文件导入</p><h1 title={document?.fileName}>{document?.fileName ?? '文件导入'}</h1><p className="toolbar-caption">{document ? '保留来源，核对每一个片段。' : '把字幕与文本，带到同一个工作台。'}</p></div>
-        <div className="toolbar-actions"><button className="secondary" disabled={busy || !document} onClick={() => void storageAction(saveSource)}>保存来源</button><button className="primary" disabled={busy} onClick={() => void importFile()}><Icon name="plus" size={16} />{busy ? '正在处理…' : '导入文件'}</button></div>
+        <div className="toolbar-actions"><button className="secondary" disabled={busy} onClick={openMarkdown}>打开 Markdown</button><button className="secondary" disabled={busy || !document} onClick={() => void storageAction(saveSource)}>保存来源</button><button className="primary" disabled={busy} onClick={() => void importFile()}><Icon name="plus" size={16} />{busy ? '正在处理…' : '导入文件'}</button></div>
       </header>
       <div className="library-bar"><span title={library.directory ?? ''}>{library.directory ? `保存目录：${library.directory}` : '选择本地目录，归档后可在重启时重新打开。'}</span><button disabled={busy} onClick={() => void storageAction(async () => { await chooseDirectory(); })}>{library.directory ? '更改目录' : '选择保存目录'}</button></div>
       {notice && <div className={`notice ${notice.error ? 'error' : ''}`} role={notice.error ? 'alert' : 'status'}>{notice.text}</div>}

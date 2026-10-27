@@ -7,5 +7,10 @@ const api: DesktopApi = {
   saveSource: (...args: unknown[]) => ipcRenderer.invoke('storage:save', ...args),
   resumeSave: (...args: unknown[]) => ipcRenderer.invoke('storage:resume', ...args),
   openRevision: (...args: unknown[]) => ipcRenderer.invoke('storage:open', ...args),
+  readerOpen: (...args: unknown[]) => ipcRenderer.invoke('reader:open', ...args),
+  readerRevision: (...args: unknown[]) => ipcRenderer.invoke('reader:revision', ...args),
+  readerRefresh: (...args: unknown[]) => ipcRenderer.invoke('reader:refresh', ...args),
+  readerExternal: (...args: unknown[]) => ipcRenderer.invoke('reader:external', ...args),
+  readerLink: (...args: unknown[]) => ipcRenderer.invoke('reader:link', ...args),
 };
 contextBridge.exposeInMainWorld('clipnote', api);

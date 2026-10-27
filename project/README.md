@@ -1,6 +1,6 @@
 # ClipNote 开发与验证
 
-当前包含桌面文件工作台、本地来源归档与版本保存，以及 T02 独立接入探针。桌面源码使用 TypeScript，界面采用 React；探针继续使用 Node ESM。桌面已支持四格式导入、来源片段、原文位置、长文件分页、归档版本及保存恢复；AI 分析、Markdown 阅读器和安装包尚未实现。
+当前包含桌面文件工作台、本地归档与版本保存、Markdown 阅读器，以及 T02 独立接入探针。桌面源码使用 TypeScript，界面采用 React；探针继续使用 Node ESM。已支持四格式来源、版本保存/恢复，以及独立只读 Markdown 阅读；AI 分析和安装包尚未实现。
 
 ## 打开桌面窗口
 
@@ -28,14 +28,27 @@ npm.cmd start
 
 当前开发设置和恢复草稿在 `../.local/desktop/storage/`，输出位置必须明确选择；拒绝接管没有专属标记的同名 ClipNote 目录，也拒绝管理路径中的符号链接/junction。开发时禁止选代码仓库内作为输出，已忽略的 `.local/`、`.runtime/` 子目录除外。安装包的正式数据路径由 T12 确定。
 
+## Markdown 阅读
+
+点击工具栏“打开 Markdown”直接选择已有 `.md`，不需要先导入或归档。左侧目录可展开/收起，点击标题定位正文；重复标题有独立锚点，长文按100个根块分页，目录可以直接跳到其他页。无标题文档直接阅读正文，空文档明确提示。
+
+在文件工作台左侧“已保存版本”点击“阅读笔记”，读取该版本当前的 `note.md`，包括外部人工修改。点击“查看来源”回到完整来源工作台；归档正文中的 `source.<格式>` 链接可查看该来源，`source.<格式>#<segmentId>` 或 `clipnote-source:<segmentId>` 可以定位实际片段。普通独立 MD 的任意相对文件链接不会获得读取本地文件的权限。
+
+外部编辑后点击“刷新文件”，重新读取磁盘；失败时保留旧正文并显示错误。不会自动监听或改写文件。“外部打开”只在主动点击时调用系统默认 Markdown 应用；不强制 Obsidian，不自动创建笔记库。外部程序和浏览器本身的安装/关联不由本功能配置。
+
+HTML 显示为文本，图片只显示替代说明，不自动访问远程地址或本地图片。仅正文中已登记的 HTTP(S) 链接可经主动点击交系统浏览器；脚本、data、file 等链接禁用。当前不提供内置编辑、图片加载或 Obsidian 专属库发现。
+
+阅读限制：原文件及解码后 UTF-8 内容均不超过2 MiB，AST 最多20,000节点、64层嵌套。超限明确报错，完整内容不会被静默截断。标题树和正文使用同一 AST，代码/frontmatter 内的伪标题不会出现在目录。阅读路径拒绝符号链接/junction；文件删除、路径替换或归档缺失时提示无法读取。每个窗口最多保留5个受控阅读会话，过期后重新打开即可。
+
 ## 桌面源码与检查
 
-- `src/main/`、`src/preload/`：窗口、可信主 frame 的受限导入/存储 IPC 和文件 Worker。
+- `src/main/`、`src/preload/`：窗口、可信主 frame 的受限导入/存储/阅读 IPC 和文件 Worker。
 - `src/contracts/`、`src/modules/source/`、`src/modules/storage/`：来源字节快照、解析、版本发布和恢复；存储接口接受 Markdown 与白名单元数据，供后续生成流程复用。
-- `src/renderer/`：当前会话、来源预览、归档列表与重试入口；不直接访问 Node、文件系统或凭据。
+- `src/modules/reader/`、`src/renderer/features/reader/`：Worker 读取解析，以及共用 AST 的标题树和正文；只渲染白名单 React 元素。
+- `src/renderer/`：当前会话、来源预览、归档列表、重试与阅读入口；不直接访问 Node、文件系统或凭据。
 - `npm.cmd run typecheck`：TypeScript 类型检查。
 - `npm.cmd test`：来源/桌面控制单元测试及 T02 本地集成回归；不会发真实 AI 请求。
-- `npm.cmd run test:e2e`：顺序运行 Playwright 的导入/安全/定位、归档/外部修改/重启/恢复，以及不带调试器、直接执行 `npm.cmd start` 的原生显示、重复启动、最小化、最大化、还原和关闭退出。Playwright 替换系统选择框返回值，后续 IPC/Worker/文件写入执行真实代码；普通启动回归按测试拥有的进程树发送 Windows 系统窗口命令，不调用 Playwright app.close()。无需另下浏览器，截图在 `../.local/test-artifacts/`，`npm-start-native.png` 为含系统标题栏的截图，`storage-versions.png` 为版本面板。
+- `npm.cmd run test:e2e`：顺序检查导入、归档、阅读、安全与恢复，以及不带调试器、直接执行 `npm.cmd start` 的原生显示、重复启动、最小化、最大化、还原和关闭退出。Playwright 替换系统选择框返回值，后续 IPC/Worker/文件写入执行真实代码；普通启动回归按测试拥有的进程树发送 Windows 系统窗口命令，不调用 Playwright app.close()。无需另下浏览器，截图在 `../.local/test-artifacts/`：`npm-start-native.png` 含系统标题栏，`storage-versions.png` 为版本面板，`markdown-reader.png` 为阅读界面。
 
 E2E 为每组测试创建独立 userData 和输出目录，只清理自己拥有的资源，不更改日常保存位置。内部 `CLIPNOTE_TEST_USER_DATA` 仅允许指向本项目 `.local/test-artifacts/` 内；不要在日常运行设置它。受限执行环境若阻止 Electron 访问运行时，应在获准的系统桌面运行检查，不通过关闭产品 sandbox 或修改系统 ACL 绕过。
 
@@ -47,6 +60,7 @@ E2E 为每组测试创建独立 userData 和输出目录，只清理自己拥有
 - Electron：45.0.0，实际内置 Node 24.22.0。
 - @earendil-works/pi-ai：1.4.0，声明 Node >=22.19.0。
 - React/React DOM：19.3.1；TypeScript：7.0.2；Vite：8.3.5；esbuild：0.28.2；Playwright：1.64.1。
+- Markdown：unified11.0.5、remark-parse11.0.0、remark-frontmatter5.0.0、remark-gfm4.0.1；@types/mdast4.0.4。新增依赖随清单及锁文件提交，安装禁用脚本，未升级既有运行时。
 - 依赖用 package-lock.json 固定；Playwright 复用项目 Electron，未下载其他浏览器。
 
 ## 本地准备

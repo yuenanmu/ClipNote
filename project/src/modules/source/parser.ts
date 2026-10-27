@@ -5,7 +5,7 @@ import { SourceImportError } from './errors.ts';
 export const MAX_FILE_BYTES = 16 * 1024 * 1024;
 export const MAX_SEGMENTS = 20_000;
 
-function decode(bytes: Uint8Array): { rawText: string; encoding: SourceEncoding } {
+export function decodeSourceBytes(bytes: Uint8Array): { rawText: string; encoding: SourceEncoding } {
   let encodings: SourceEncoding[] = ['utf-8', 'gb18030'];
   if (bytes[0] === 0xff && bytes[1] === 0xfe) encodings = ['utf-16le'];
   else if (bytes[0] === 0xfe && bytes[1] === 0xff) encodings = ['utf-16be'];
@@ -62,7 +62,7 @@ export function parseSource(bytes: Uint8Array, originalPath: string): SourceDocu
   const format = extname(originalPath).slice(1).toLowerCase() as SourceFormat;
   if (!['srt', 'vtt', 'txt', 'md'].includes(format)) throw new SourceImportError('UNSUPPORTED_FORMAT');
   if (bytes.byteLength > MAX_FILE_BYTES) throw new SourceImportError('FILE_TOO_LARGE');
-  const { rawText, encoding } = decode(bytes);
+  const { rawText, encoding } = decodeSourceBytes(bytes);
   if (!rawText.trim()) throw new SourceImportError('EMPTY_FILE');
   const checksum = createHash('sha256').update(bytes).digest('hex');
   const sourceId = createHash('sha256').update(`${format}\0${checksum}`).digest('hex');
