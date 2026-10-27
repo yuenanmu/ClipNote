@@ -18,7 +18,7 @@
 
 - 工作分支 feat/note-analysis，从获批 T05 合并提交 7830f63 创建；不在 main 开发。
 - T06 不调用真实 AI、不增加界面分析入口、不启动 T07/T08/T09，不推送或合并本分支。
-- 输入预算默认 16,000 UTF-16 字符，输出默认 64,000 字符；重叠最多400字符，最多1,000块、2,000结构节点、结构深度8层；最终 Markdown 限512 KiB。
+- 输入预算建议默认 16,000 UTF-16 字符，输出建议默认 64,000 字符；重叠最多400字符，最多1,000块、2,000结构节点、结构深度8层；最终 Markdown 限512 KiB。
 - 本地检查使用合成资料；日志与产物仅写忽略的 .local；来源原文与文件路径不写普通错误消息。
 
 ## Review Focus
@@ -35,10 +35,10 @@ Files: 新建 project/src/contracts/analysis.ts、project/src/modules/analysis/{
 
 Interfaces: planAnalysis(source, profile?) → ChunkPlan；validateOutline(value, source, chunk?) → NoteOutline。
 
-- [ ] 写短文整体、长文完整覆盖/预算、超长单段/emoji、重叠范围、无效预算、结构/引用/截断边界测试；先用接口占位确认因目标行为缺失失败。
-- [ ] 实现预算校验、确定性计划与来源区间校验；输出只接受显式白名单结构，不接收模型时间。
-- [ ] node --test tests/unit/analysis.test.ts 全通过；npm.cmd run typecheck 通过。
-- [ ] 显式暂存本阶段文件并本地提交。
+- [x] 写短文整体、长文完整覆盖/预算、超长单段/emoji、重叠范围、无效预算、结构/引用/截断边界测试；先用接口占位确认因目标行为缺失失败。
+- [x] 实现预算校验、确定性计划与来源区间校验；输出只接受显式白名单结构，不接收模型时间。
+- [x] node --test tests/unit/analysis.test.ts 全通过；npm.cmd run typecheck 通过。
+- [x] 显式暂存本阶段文件并本地提交。
 
 ## Task 2：串行分析、确定性合并与 Markdown
 
@@ -46,11 +46,11 @@ Files: 新建 project/src/modules/analysis/{run,markdown}.ts；扩展上述单�
 
 Interfaces: analyzeSource(source, profile, adapter, options?) → AnalysisResult；renderMarkdown(outline, source) → string。分析器传递 signal；检查点为当前计划/服务/模型/提示词归属的已验证块；失败保留已完成块，不持久化到磁盘（T09/T11 负责）。
 
-- [ ] 先写缺失/重复/截断、最多一次格式修正、取消、恢复归属、精确去重、Markdown 安全/层级和保存后来源链接/脑图目标测试，并确认 RED。
-- [ ] 实现串行调用、白名单错误、检查点恢复与同依据精确去重；生成标题+嵌套列表、原始来源链接及真实时间/段落标签。
-- [ ] 验证合成结果经真实 StorageService 保存/重开，再经 M06 同 AST 制图和引用分类。
-- [ ] 运行 typecheck、build、npm.cmd test；窗口回归用于确认桌面原有行为；更新 M04、架构、索引、任务/交接及开发说明。
-- [ ] 全分支只读审阅，处理实质问题并回归；显式暂存、检查、本地提交。申请 T06 合并另需用户批准。
+- [x] 先写缺失/重复/截断、最多一次格式修正、取消、恢复归属、精确去重、Markdown 安全/层级和保存后来源链接/脑图目标测试，并确认 RED。
+- [x] 实现串行调用、白名单错误、检查点恢复与同依据精确去重；生成标题+嵌套列表、原始来源链接及真实时间/段落标签。
+- [x] 验证合成结果经真实 StorageService 保存/重开，再经 M06 同 AST 制图和引用分类。
+- [x] 运行 typecheck、build、npm.cmd test；窗口回归用于确认桌面原有行为；更新 M04、架构、索引、任务/交接及开发说明。
+- [x] 全分支只读审阅，处理实质问题并回归；显式暂存、检查、本地提交。申请 T06 合并另需用户批准。
 
 ## 执行记录
 
