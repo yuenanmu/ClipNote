@@ -11,6 +11,12 @@ export type ImportErrorCode = SourceErrorCode | 'IMPORT_BUSY' | 'FORBIDDEN_REQUE
 export type ImportResult = { status: 'imported'; document: SourceDocument } | { status: 'cancelled' } | { status: 'error'; error: { code: ImportErrorCode; message: string } };
 export type StorageResult<T> = { status: 'ok'; value: T } | { status: 'cancelled' } | { status: 'error'; error: { code: StorageErrorCode | 'FORBIDDEN_REQUEST' | 'STORAGE_BUSY'; message: string; draftId?: string } };
 export interface DesktopApi {
+  workspace(kind: 'source' | 'notes', action: string, ...args: unknown[]): Promise<{ status: 'ok'; value: any } | { status: 'cancelled' } | { status: 'error'; error: { code: string; message: string } }>;
+  batchState(): Promise<any>;
+  batchPrepare(ids: string[], folderId: string, expected: { baseUrl: string; model: string; instructions: string }): Promise<any>;
+  batchStart(): Promise<any>;
+  batchCancel(): Promise<any>;
+  batchRetry(ids: string[]): Promise<any>;
   workflowState(): Promise<WorkflowResult>;
   workflowStart(sourceId: string, expected: { baseUrl: string; model: string; instructions?: string }): Promise<WorkflowResult>;
   workflowCancel(): Promise<WorkflowResult>;

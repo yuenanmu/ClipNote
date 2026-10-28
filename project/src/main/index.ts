@@ -7,6 +7,9 @@ import { createStorageHandlers } from './storage-controller.ts';
 import { createReaderHandlers } from './reader-controller.ts';
 import { createApiHandlers } from './api-controller.ts';
 import { createWorkflowHandlers } from './workflow-controller.ts';
+import { createWorkspaceHandler } from './workspace-controller.ts';
+import { createBatchHandlers } from './batch-controller.ts';
+import { WorkspaceFiles } from '../modules/workspace/files.ts';
 import { runAnalysisWorker } from './analysis-task.ts';
 import { ApiConfigStore, normalizeBaseUrl } from '../modules/api/config.ts';
 import { listModels, resolveModelKey } from '../modules/api/models.ts';
@@ -107,13 +110,62 @@ app.whenReady().then(() => {
   });
   for (const [action, handler] of Object.entries(readerHandlers)) ipcMain.handle(`reader:${action}`, handler);
   const apiStore = new ApiConfigStore(join(local, 'api'), safeStorage);
+  let activeJob: 'single' | 'batch' | undefined, gateBusy = false;
+  const workspace = new WorkspaceFiles(join(local, 'workspace'));
+  const workspaceHandler = createWorkspaceHandler({ isTrustedSender: trusted, execute: async (kind, action, args) => {
+    const type = kind as 'source' | 'notes'; const id = args[0] as string;
+    if (action === 'root') return workspace.root(type);
+    if (action === 'choose') { const selected = await dialog.showOpenDialog(window, { title: type === 'source' ? '选择资料根目录' : '选择笔记根目录', properties: ['openDirectory', 'createDirectory'] }); return selected.canceled || !selected.filePaths[0] ? undefined : workspace.choose(type, selected.filePaths[0]); }
+    if (action === 'list') return workspace.list(type, id, args[1] as number | undefined);
+    if (action === 'search') return workspace.search(type, args[0] as string);
+    if (action === 'mkdir') return workspace.createDirectory(type, id, args[1] as string);
+    if (action === 'create') return workspace.createNote(id, args[1] as string);
+    if (action === 'move') return workspace.move(type, id, args[1] as string);
+    if (action === 'rename') return workspace.rename(type, id, args[1] as string);
+    if (action === 'trash') return workspace.trash(type, id, path => shell.trashItem(path));
+    if (action === 'read') return workspace.readNote(id);
+    if (action === 'save') return workspace.saveNote(id, args[1] as string, args[2] as string);
+    if (action === 'associate') return workspace.associate(id, args[1] as string);
+    if (action === 'import') return loadInWorker(await workspace.filePath(type, id));
+    throw new Error('Invalid workspace action');
+  } });
+  ipcMain.handle('workspace:action', async (event, kind, action, ...args) => {
+    if (!trusted(event)) return workspaceHandler(event, kind, action, ...args);
+    if (!['choose','mkdir','create','move','rename','trash','save','associate'].includes(action)) return workspaceHandler(event, kind, action, ...args);
+    if (gateBusy) return { status: 'error', error: { code: 'BUSY', message: '整理任务进行中，请稍后操作文件。' } };
+    gateBusy = true;
+    try {
+      if (await isJobActive(event)) return { status: 'error', error: { code: 'BUSY', message: '整理任务进行中，请稍后操作文件。' } };
+      return await workspaceHandler(event, kind, action, ...args);
+    } finally { gateBusy = false; }
+  });
   const workflowHandlers = createWorkflowHandlers({ isTrustedSender: trusted, source: id => snapshots.get(id), credentials: () => apiStore.credentials(),
     hasDirectory: async () => Boolean((await tasks.run(join(__dirname, 'storage-worker.cjs'), { stateDir: join(local, 'storage'), action: 'state', payload: {} }, true)).directory),
     analyze: (source, credentials, options) => runAnalysisWorker(join(__dirname, 'analysis-worker.cjs'), source, credentials, options),
     save: (source, result) => tasks.run(join(__dirname, 'storage-worker.cjs'), { stateDir: join(local, 'storage'), action: 'save-generated', payload: { snapshot: source, markdown: result.markdown, metadata: { kind: 'generated-note', provider: result.attempt.provider, model: result.attempt.model, promptVersion: result.attempt.promptVersion, sourceRefs: result.sourceRefs } } }, true),
     resume: draftId => tasks.run(join(__dirname, 'storage-worker.cjs'), { stateDir: join(local, 'storage'), action: 'resume', payload: { draftId } }, true),
   });
-  for (const [action, handler] of Object.entries(workflowHandlers)) ipcMain.handle(`workflow:${action}`, handler);
+  const batchHandlers = createBatchHandlers({ isTrustedSender: trusted,
+    config: async () => { const value = await apiStore.state(); if (!value.configured) throw new ApiError('INVALID_CONFIG'); return value; },
+    preview: (id, target) => workspace.previewOutput(id, target),
+    analyze: async (id, expected, signal) => { const credentials = await apiStore.credentials(); if (credentials.baseUrl !== expected.baseUrl || credentials.model !== expected.model) throw new ApiError('INVALID_CONFIG');
+      const source = await tasks.run(join(__dirname, 'source-worker.cjs'), { filePath: await workspace.filePath('source', id) });
+      return runAnalysisWorker(join(__dirname, 'analysis-worker.cjs'), source.document, credentials, { signal, instructions: expected.instructions }); },
+    save: (id, target, plan, markdown) => workspace.writeOutput(id, target, plan, markdown),
+  });
+  async function isJobActive(event: unknown): Promise<boolean> {
+    if (!activeJob) return false; const response = activeJob === 'single' ? await workflowHandlers.state(event) : await batchHandlers.state(event);
+    if (response.status === 'ok' && ['running','saving'].includes(response.value.status)) return true;
+    activeJob = undefined; return false;
+  }
+  const guarded = async (event: unknown, type: 'single' | 'batch', run: () => Promise<any>) => {
+    if (!trusted(event) || gateBusy) return { status: 'error', error: { code: 'BUSY', message: '已有整理任务正在进行。' } };
+    gateBusy = true; try { if (await isJobActive(event)) return { status: 'error', error: { code: 'BUSY', message: '已有整理任务正在进行。' } };
+      activeJob = type; const result = await run(); if (result.status !== 'ok' || !['running','saving'].includes(result.value.status)) activeJob = undefined; return result;
+    } finally { gateBusy = false; }
+  };
+  for (const [action, handler] of Object.entries(workflowHandlers)) ipcMain.handle(`workflow:${action}`, action === 'start' || action === 'retry' ? (event, ...args) => guarded(event, 'single', () => handler(event, ...args)) : handler);
+  for (const [action, handler] of Object.entries(batchHandlers)) ipcMain.handle(`batch:${action}`, action === 'start' || action === 'retry' ? (event, ...args) => guarded(event, 'batch', () => handler(event, ...args)) : handler);
   const apiHandlers = createApiHandlers({ isTrustedSender: trusted, store: apiStore, models: async (input, signal) => {
     const baseUrl = normalizeBaseUrl(input.baseUrl); const key = await resolveModelKey(apiStore, baseUrl, input.apiKey);
     return listModels(baseUrl, key, signal);
@@ -134,6 +186,8 @@ app.whenReady().then(() => {
     for (const action of Object.keys(readerHandlers)) ipcMain.removeHandler(`reader:${action}`);
     for (const action of Object.keys(apiHandlers)) ipcMain.removeHandler(`api:${action}`);
     for (const action of Object.keys(workflowHandlers)) ipcMain.removeHandler(`workflow:${action}`);
+    for (const action of Object.keys(batchHandlers)) ipcMain.removeHandler(`batch:${action}`);
+    ipcMain.removeHandler('workspace:action');
     tasks.stop(); snapshots.clear();
   });
   void window.loadFile(join(__dirname, '../renderer/index.html'));

@@ -1,0 +1,31 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { dirname, join, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { _electron as electron } from 'playwright';
+import electronPath from 'electron';
+
+test('desktop manages chosen real folders and edits notes without copying source files', { timeout: 120000 }, async t => {
+  const base=fileURLToPath(new URL('../../../.local/test-artifacts/',import.meta.url)); mkdirSync(base,{recursive:true}); const own=mkdtempSync(join(base,'workspace-ui-'));
+  const sources=join(own,'资料'),notes=join(own,'笔记'); mkdirSync(sources); mkdirSync(notes); writeFileSync(join(sources,'原文.txt'),'真实原文'); writeFileSync(join(sources,'待删除.txt'),'临时资料'); writeFileSync(join(notes,'笔记.md'),'# 初始笔记');
+  const env={...process.env,CLIPNOTE_TEST_USER_DATA:join(own,'profile')}; delete env.ELECTRON_RUN_AS_NODE; let app;
+  t.after(async()=>{ if(app) await app.close(); assert.equal(resolve(dirname(own)),resolve(base)); rmSync(own,{recursive:true,force:true}); });
+  app=await electron.launch({executablePath:electronPath,args:[fileURLToPath(new URL('../../dist/main/index.cjs',import.meta.url))],env}); const page=await app.firstWindow(); page.setDefaultTimeout(10000);
+  const pick=path=>app.evaluate(({dialog},selected)=>{dialog.showOpenDialog=async()=>({canceled:false,filePaths:[selected]});},path);
+  await pick(sources); const source=page.getByRole('region',{name:'资料文件夹'}); await source.getByRole('button',{name:'选择',exact:true}).click(); await source.getByText('原文.txt').waitFor();
+  await page.screenshot({path:join(base,'workspace-directory.png')});
+  await source.getByRole('button',{name:'新建文件夹'}).click(); await source.getByLabel('文件名称').fill('分类'); await source.getByRole('button',{name:'确认'}).click(); await source.getByText('分类').waitFor();
+  await source.getByText('原文.txt').click({button:'right'}); await source.getByRole('menuitem',{name:'移动'}).click(); await source.getByLabel('目标文件夹').selectOption({label:'分类'}); await source.getByRole('button',{name:'确认'}).click();
+  await source.getByRole('button',{name:'展开 分类'}).click(); await source.getByText('原文.txt').waitFor(); assert.equal(readFileSync(join(sources,'分类','原文.txt'),'utf8'),'真实原文');
+  await source.getByLabel('搜索文件').fill('原文'); await source.getByRole('button',{name:'搜索',exact:true}).click(); await source.getByText(/分类.*原文\.txt/).waitFor(); await source.locator('button:enabled').filter({hasText:'搜索'}).waitFor(); await source.getByRole('button',{name:'返回目录'}).click();
+  await source.locator('.workspace-row').filter({hasText:'原文.txt'}).dragTo(source.locator('.workspace-row').filter({hasText:'根目录'})); for(let i=0;i<50 && !existsSync(join(sources,'原文.txt'));i++) await page.waitForTimeout(100); assert.equal(readFileSync(join(sources,'原文.txt'),'utf8'),'真实原文');
+  await source.getByText('待删除.txt').click(); await source.getByRole('button',{name:'删除',exact:true}).click(); await source.getByText(/移入系统回收站/).waitFor(); await source.getByRole('button',{name:'取消',exact:true}).click(); assert.equal(existsSync(join(sources,'待删除.txt')),true);
+  await app.evaluate(({shell})=>{ shell.trashItem=async path=>{ process.getBuiltinModule('node:fs').unlinkSync(path); globalThis.__clipnoteTrashPath=path; }; }); await source.getByRole('button',{name:'删除',exact:true}).click(); await source.getByRole('button',{name:'确认'}).click();
+  for(let i=0;i<50 && existsSync(join(sources,'待删除.txt'));i++) await page.waitForTimeout(100); assert.equal(await app.evaluate(()=>globalThis.__clipnoteTrashPath),join(sources,'待删除.txt')); assert.equal(existsSync(join(sources,'待删除.txt')),false);
+  await page.getByRole('button',{name:'笔记',exact:true}).click(); await pick(notes); const tree=page.getByRole('region',{name:'笔记文件夹'}); await tree.getByRole('button',{name:'选择',exact:true}).click(); await tree.getByText('笔记.md').waitFor();
+  await tree.getByText('笔记.md').click(); await tree.getByRole('button',{name:'编辑',exact:true}).click(); await tree.getByLabel('编辑 Markdown').fill('# 我的修改'); writeFileSync(join(notes,'笔记.md'),'# 外部修改'); await tree.getByRole('button',{name:'保存笔记'}).click(); await tree.getByText(/已被外部修改/).waitFor(); assert.equal(readFileSync(join(notes,'笔记.md'),'utf8'),'# 外部修改');
+  await tree.getByRole('button',{name:'关闭编辑'}).click(); await tree.getByRole('button',{name:'放弃更改'}).click(); await tree.getByRole('button',{name:'编辑',exact:true}).click(); await tree.getByLabel('编辑 Markdown').fill('# 已编辑笔记'); await page.screenshot({path:join(base,'workspace-editor.png')}); await tree.getByRole('button',{name:'保存笔记'}).click(); await tree.getByText('笔记已保存。').waitFor(); assert.equal(readFileSync(join(notes,'笔记.md'),'utf8'),'# 已编辑笔记');
+  await tree.getByRole('button',{name:'关闭编辑'}).click(); await page.getByRole('button',{name:'返回文件工作台'}).click(); await source.getByText('原文.txt').dblclick(); await page.getByRole('heading',{name:'原文.txt'}).waitFor();
+  await page.getByRole('button',{name:'AI 整理'}).click(); const panel=page.getByRole('region',{name:'批量整理'}); await panel.getByRole('button',{name:'检查所选文件'}).waitFor(); assert.equal(await panel.getByRole('button',{name:'批量整理（1）'}).count(),1);
+});

@@ -3,6 +3,8 @@ import type { DesktopApi } from '../contracts/desktop.ts';
 import type { SourceDocument } from '../contracts/source.ts';
 import type { LibraryState, SavedRevision } from '../contracts/storage.ts';
 import { LibrarySidebar } from './LibrarySidebar.tsx';
+import { WorkspaceTree } from './WorkspaceTree.tsx';
+import { BatchPanel } from './BatchPanel.tsx';
 import { NotesWorkspace } from './features/reader/NotesWorkspace.tsx';
 import { ApiSettings } from './features/api/ApiSettings.tsx';
 import type { NoteEntry, ReaderDocument } from '../contracts/reader.ts';
@@ -46,6 +48,10 @@ export function App() {
   const [showApi, setShowApi] = useState(false);
   const [workflow, setWorkflow] = useState<WorkflowState>({ status: 'idle', completedChunks: 0 });
   const [instructions, setInstructions] = useState(() => { try { return (window.localStorage.getItem(INSTRUCTIONS_KEY) ?? '').slice(0, 1000); } catch { return ''; } });
+  const [batchIds, setBatchIds] = useState<string[]>([]);
+  const [workspaceSources, setWorkspaceSources] = useState<Record<string, string>>({});
+  const [workspaceSourceId, setWorkspaceSourceId] = useState<string>();
+  const [batchOpenRequest, setBatchOpenRequest] = useState(0);
   const [proposal, setProposal] = useState<{ sourceId: string; fileName: string; baseUrl: string; model: string }>();
   const [noteEntries, setNoteEntries] = useState<NoteEntry[]>([]);
   const document = documents.find(item => item.sourceId === activeId);
@@ -57,7 +63,7 @@ export function App() {
   useEffect(() => { if (view === 'raw') rawMark.current?.scrollIntoView({ block: 'center' }); }, [view, selected, rawPage, activeId]);
   const openOriginal = () => { setRawPage(Math.floor((segment?.range.startOffset ?? 0) / RAW_PREVIEW_LIMIT)); setView('raw'); };
 
-  const selectDocument = (source: SourceDocument) => { setShowReader(false); setActiveId(source.sourceId); setSelected(0); setPage(0); setRawPage(0); setView('segments'); setNotice(undefined); setSavedVersion(undefined); setProposal(undefined); };
+  const selectDocument = (source: SourceDocument) => { setShowReader(false); setActiveId(source.sourceId); setWorkspaceSourceId(workspaceSources[source.sourceId]); setSelected(0); setPage(0); setRawPage(0); setView('segments'); setNotice(undefined); setSavedVersion(undefined); setProposal(undefined); };
   const addDocument = (source: SourceDocument) => { setDocuments(previous => [source, ...previous.filter(item => item.sourceId !== source.sourceId)].slice(0, 5)); selectDocument(source); };
   const refreshLibrary = async () => {
     const result = await window.clipnote.libraryState();
@@ -101,6 +107,7 @@ export function App() {
   };
   const prepareAnalysis = async () => {
     if (busy || !document) return; setBusy(true); setNotice(undefined);
+    if (workspaceSourceId) { setBatchIds([workspaceSourceId]); setBatchOpenRequest(value => value + 1); setBusy(false); return; }
     try { if (!library.directory && !await chooseDirectory()) return; const config = await window.clipnote.apiState();
       if (config.status === 'error') { setNotice({ text: config.error.message, error: true }); return; }
       if (!config.value.configured) { setNotice({ text: '请先在 API 设置中配置服务和模型。', error: true }); return; }
@@ -176,7 +183,7 @@ export function App() {
   });
 
   if (showApi) return <ApiSettings onBack={() => setShowApi(false)} />;
-  if (showReader) return <NotesWorkspace document={readerDocument} entries={noteEntries} revisions={library.revisions} busy={busy} notice={notice} onAdd={openMarkdown} onOpen={noteOpen} onRemove={noteRemove} onRelink={noteRelink} onListRefresh={() => void readerAction(async () => { await refreshNotes(); await refreshLibrary(); })} onRevision={readVersion} onBack={() => { setShowReader(false); setNotice(undefined); }} onRefresh={() => void readerAction(async () => { if (readerDocument) acceptReader(await window.clipnote.readerRefresh(readerDocument.readerId)); await refreshNotes(); })} onExternal={() => readerExternal()} onExternalLink={readerExternal} />;
+  if (showReader) return <NotesWorkspace document={readerDocument} entries={noteEntries} revisions={library.revisions} busy={busy} notice={notice} onAdd={openMarkdown} onOpen={noteOpen} onRemove={noteRemove} onRelink={noteRelink} onListRefresh={() => void readerAction(async () => { await refreshNotes(); await refreshLibrary(); })} onRevision={readVersion} onBack={() => { setShowReader(false); setNotice(undefined); }} onRefresh={() => void readerAction(async () => { if (readerDocument) acceptReader(await window.clipnote.readerRefresh(readerDocument.readerId)); await refreshNotes(); })} onExternal={() => readerExternal()} onExternalLink={readerExternal} workspace={<WorkspaceTree kind="notes" disabled={busy} onOpen={source => void readerAction(async () => { acceptReader(await window.clipnote.noteSource(source.sourceId)); await refreshNotes(); })} />} />;
 
   return <div className="app-shell">
     <aside className="sidebar">
@@ -185,6 +192,7 @@ export function App() {
       <div className="nav-current"><Icon name="layers" size={17} />文件导入<span className="nav-dot" /></div>
       <button className="notes-nav-button" disabled={busy} onClick={enterNotes}><Icon name="file" size={17} />笔记</button>
       <button className="notes-nav-button" disabled={busy} onClick={() => setShowApi(true)}><Icon name="shield" size={17} />API 设置</button>
+      <WorkspaceTree kind="source" disabled={busy} onOpen={(source, entryId) => { addDocument(source); setWorkspaceSources(old => ({ ...old, [source.sourceId]: entryId })); setWorkspaceSourceId(entryId); }} selectedIds={batchIds} onToggle={(id, checked) => setBatchIds(old => checked ? old.length < 100 ? [...old, id] : old : old.filter(value => value !== id))} onClear={() => { setBatchIds([]); setWorkspaceSources({}); setWorkspaceSourceId(undefined); }} />
       <p className="session-title">本次会话</p>
       <div className="session-files">
         {!documents.length && <p className="session-empty">导入的资料会显示在这里。<br />从一份字幕或文本开始。</p>}
@@ -200,6 +208,7 @@ export function App() {
         <div className="toolbar-actions">{document?.format === 'md' && <button className="secondary" disabled={busy} onClick={noteFromSource}>加入笔记区</button>}<button className="secondary" disabled={busy || !document} onClick={() => void storageAction(saveSource)}>保存来源</button><button className="secondary" disabled={busy || !document} onClick={() => void prepareAnalysis()}>AI 整理</button><button className="primary" disabled={busy} onClick={() => void importFile()}><Icon name="plus" size={16} />{busy ? '正在处理…' : '导入文件'}</button></div>
       </header>
       <div className="library-bar"><span title={library.directory ?? ''}>{library.directory ? `保存目录：${library.directory}` : '选择本地目录，归档后可在重启时重新打开。'}</span><button disabled={busy} onClick={() => void storageAction(async () => { await chooseDirectory(); })}>{library.directory ? '更改目录' : '选择保存目录'}</button></div>
+      <BatchPanel ids={batchIds} instructions={instructions} disabled={busy} onBusy={setBusy} openRequest={batchOpenRequest} />
       {notice && <div className={`notice ${notice.error ? 'error' : ''}`} role={notice.error ? 'alert' : 'status'}>{notice.text}</div>}
       {!!library.warnings.length && <div className="library-warning" role="status">{library.warnings[0]}</div>}
       {proposal && <section className="analysis-confirm" aria-label="确认发送资料"><strong>确认发送资料</strong><p>将「{proposal.fileName}」的内容发送至 {proposal.baseUrl}，使用模型 {proposal.model} 整理。内容可能分多次发送；遇到输出截断会拆小重试，增加请求次数和费用。</p><label>补充整理要求（选填）<textarea aria-label="补充整理要求" maxLength={1000} value={instructions} onChange={event => setInstructions(event.target.value)} placeholder="例如：重点整理操作步骤，保留示例" /></label><p>默认规则会保留来源引用；补充要求也会发送给所选服务。</p><div><button className="secondary" disabled={busy} onClick={() => { try { window.localStorage.setItem(INSTRUCTIONS_KEY, instructions); setNotice({ text: '补充要求已保存到本机。' }); } catch { setNotice({ text: '无法保存补充要求。', error: true }); } }}>保存补充要求</button><button className="secondary" disabled={busy} onClick={() => { try { window.localStorage.removeItem(INSTRUCTIONS_KEY); setInstructions(''); setNotice({ text: '已恢复默认整理要求。' }); } catch { setNotice({ text: '无法恢复默认要求。', error: true }); } }}>恢复默认</button><button className="primary" disabled={busy} onClick={() => void startAnalysis()}>确认发送并整理</button><button className="secondary" disabled={busy} onClick={() => setProposal(undefined)}>取消</button></div></section>}

@@ -1,14 +1,16 @@
 import type { NoteEntry, ReaderDocument } from '../../../contracts/reader.ts';
 import type { SavedRevision } from '../../../contracts/storage.ts';
+import type { ReactNode } from 'react';
 import { ReaderView } from './ReaderView.tsx';
 import './reader.css';
 export interface NotesWorkspaceProps {
   document?: ReaderDocument; entries: NoteEntry[]; revisions: SavedRevision[]; busy: boolean; notice?: { text: string; error?: boolean };
+  workspace?: ReactNode;
   onAdd(): void; onOpen(id: string): void; onRemove(id: string): void; onRelink(id: string): void; onListRefresh(): void;
   onRevision(revision: SavedRevision): void; onBack(): void; onRefresh(): void; onExternal(): void; onExternalLink(url: string): void;
 }
 export function NotesWorkspace(props: NotesWorkspaceProps) {
-  const navigation = <section className="note-navigation" aria-label="笔记列表"><div className="note-list-title"><strong>笔记</strong><button disabled={props.busy} onClick={props.onListRefresh} aria-label="刷新笔记列表" title="刷新笔记列表">↻</button></div>
+  const navigation = <section className="note-navigation" aria-label="笔记列表">{props.workspace}<div className="note-list-title"><strong>笔记</strong><button disabled={props.busy} onClick={props.onListRefresh} aria-label="刷新笔记列表" title="刷新笔记列表">↻</button></div>
     <div className="note-list"><p className="note-group-title">我的 Markdown · {props.entries.length}</p>
       {!props.entries.length && <p className="session-empty">添加已有 MD，重启后继续阅读。</p>}
       {props.entries.map(entry => <div key={entry.noteId} className={`note-entry ${entry.noteId === props.document?.noteId ? 'selected' : ''}`}>
