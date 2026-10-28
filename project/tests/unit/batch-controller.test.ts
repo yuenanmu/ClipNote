@@ -34,8 +34,13 @@ test('a target changed after preview is rejected before any model request', asyn
 
 test('batch retains generated results before saving and releases only its own locks',async()=>{
   let staged=0,completed=0,locked=0,released=0;const h=createBatchHandlers({isTrustedSender:()=>true,config:async()=>config,
-    preview:async(id:string)=>({sourcePath:id,notePath:id+'.md',name:'a.md',exists:false}),analyze:async()=>({markdown:'# durable'}),
+    preview:async(id:string)=>({sourcePath:id,notePath:id+'.md',name:'a.md',exists:false}),analyze:async()=>({markdown:'# durable',timing:{prepareMs:5,apiMs:50,localMs:3,requests:2,saveMs:0}}),
     lock:plans=>{assert.equal(plans.length,1);locked++;return()=>{released++;};},stage:async(_plan,text)=>{assert.equal(text,'# durable');staged++;return ids[1];},complete:async id=>{assert.equal(id,ids[1]);completed++;},
     save:async()=>{assert.equal(staged,1);}});
-  await h.prepare('trusted',[ids[0]],target,config);await h.start('trusted');await until(h,'done');assert.equal(staged,1);assert.equal(completed,1);assert.equal(locked,1);assert.equal(released,1);
+  await h.prepare('trusted',[ids[0]],target,config);await h.start('trusted');const done=await until(h,'done');assert.equal(done.items[0].timing.requests,2);assert.equal(done.items[0].timing.apiMs,50);assert.equal(staged,1);assert.equal(completed,1);assert.equal(locked,1);assert.equal(released,1);
+});
+
+test('saving a retained result updates the queue without repeating the model request',async()=>{
+  let requests=0;const h=createBatchHandlers({isTrustedSender:()=>true,config:async()=>config,preview:async(id:string)=>({sourcePath:id,notePath:id+'.md',name:'a.md',exists:false}),analyze:async()=>{requests++;return {markdown:'# done'};},stage:async()=>ids[1],save:async()=>{throw new Error('full');}});
+  await h.prepare('trusted',[ids[0]],target,config);await h.start('trusted');await until(h,'done');await h.saved('trusted',ids[1],'new.md');const state=await until(h,'done');assert.equal(state.items[0].status,'succeeded');assert.equal(state.items[0].outputPath,'new.md');assert.equal(requests,1);
 });

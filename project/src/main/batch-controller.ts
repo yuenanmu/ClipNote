@@ -3,44 +3,48 @@ import { isUuid } from '../modules/storage/io.ts';
 import { ApiError } from '../modules/api/errors.ts';
 import { AnalysisError } from '../modules/analysis/errors.ts';
 import { WorkspaceError, type OutputPlan } from '../modules/workspace/files.ts';
-import type {BatchState,WorkspaceResult} from '../contracts/workspace.ts';
+import type {BatchState,BatchItem,WorkspaceResult} from '../contracts/workspace.ts';
 
 type Config = { baseUrl: string; model: string; instructions?: string };
 interface Dependencies {
   isTrustedSender(event: unknown): boolean; config(): Promise<{ baseUrl: string; model: string }>;
   preview(id: string, target: string): Promise<OutputPlan>;
-  analyze(id: string, config: Config, signal: AbortSignal, plan: OutputPlan): Promise<{ markdown: string }>;
+  analyze(id: string, config: Config, signal: AbortSignal, plan: OutputPlan): Promise<{ markdown: string;timing?:BatchItem['timing'] }>;
   save(id: string, target: string, plan: OutputPlan, markdown: string): Promise<void>;
   lock?(plans: OutputPlan[]):()=>void;
   stage?(plan:OutputPlan,markdown:string):Promise<string>;
   complete?(id:string):Promise<void>;
 }
-export function createBatchHandlers(deps: Dependencies): Record<'state' | 'prepare' | 'start' | 'cancel' | 'retry', (event: unknown, ...args: unknown[]) => Promise<WorkspaceResult<BatchState>>> {
+export function createBatchHandlers(deps: Dependencies): Record<'state' | 'prepare' | 'start' | 'cancel' | 'retry' | 'saved', (event: unknown, ...args: unknown[]) => Promise<WorkspaceResult<BatchState>>> {
   let state: BatchState = { status: 'idle', items: [] }, target = '', config: Config | undefined, abort: AbortController | undefined, preparing = false;
   let plans = new Map<string, OutputPlan>(), pending = new Map<string, string>();
   const drafts=new Map<string,string>();let release:(()=>void)|undefined;
   const failure = (message: string):WorkspaceResult<BatchState> => ({ status: 'error', error: { code: 'BATCH_ERROR', message } });
   const snapshot = ():WorkspaceResult<BatchState> => ({ status: 'ok', value: structuredClone(state) });
-  const safe = (error: unknown) => error instanceof ApiError || error instanceof AnalysisError ? error.message : error instanceof WorkspaceError && error.code === 'CONFLICT' ? '目标文件已存在、已更改、位于其他目录或归属不明，请检查后重新确认。' : error instanceof WorkspaceError && error.code === 'MISSING' ? '已关联的笔记不存在，请重新关联。' : '处理未完成，请检查文件及目录。';
+  const safe = (error: unknown) => error instanceof ApiError || error instanceof AnalysisError ? error.message : error instanceof WorkspaceError && error.code === 'CONFLICT' ? '目标文件已存在、已更改或归属不明，请检查后重新确认。' : error instanceof WorkspaceError && ['MISSING','RELINK_REQUIRED','ASSOCIATION_LOST'].includes(error.code) ? '已关联的笔记已移动或关联登记未完成，请重新关联。' : '处理未完成，请检查文件及目录。';
   const run = async (signal: AbortSignal) => {
     for (const item of state.items) {
       if (item.status !== 'queued') continue;
       if (signal.aborted) { item.status = 'cancelled'; continue; }
       item.status = 'running'; item.error = undefined; item.canRetrySave = false;
+      let saveStarted:number|undefined;
       try {
-        const markdown = pending.get(item.id) ?? (await deps.analyze(item.id, config!, signal,plans.get(item.id)!)).markdown;
+        let markdown=pending.get(item.id);if(markdown===undefined){const result=await deps.analyze(item.id,config!,signal,plans.get(item.id)!);markdown=result.markdown;item.timing=result.timing;}
         if (signal.aborted) { item.status = 'cancelled'; continue; }
         pending.set(item.id, markdown);
+        saveStarted=performance.now();
         if(deps.stage && !drafts.has(item.id)) drafts.set(item.id,await deps.stage(plans.get(item.id)!,markdown));
         if(signal.aborted){item.status='cancelled';continue;}
         await deps.save(item.id, target, plans.get(item.id)!, markdown);
         const draft=drafts.get(item.id);if(draft && deps.complete)await deps.complete(draft);drafts.delete(item.id);pending.delete(item.id); item.status = 'succeeded';
       } catch (error) { item.status = signal.aborted ? 'cancelled' : 'failed'; if (!signal.aborted) { item.error = safe(error); item.canRetrySave = pending.has(item.id); } }
+      finally{if(item.timing && saveStarted!==undefined)item.timing.saveMs+=performance.now()-saveStarted;}
     }
     release?.();release=undefined;state.status = signal.aborted ? 'cancelled' : 'done'; abort = undefined;
   };
-  const handle = (action: 'state' | 'prepare' | 'start' | 'cancel' | 'retry') => async (event: unknown, ...args: unknown[]) => {
+  const handle = (action: 'state' | 'prepare' | 'start' | 'cancel' | 'retry' | 'saved') => async (event: unknown, ...args: unknown[]) => {
     if (!deps.isTrustedSender(event)) return failure('无法执行批量整理。');
+    if(action==='saved'){if(args.length!==2 || !isUuid(args[0]) || typeof args[1]!=='string')return failure('保存状态无效。');for(const item of state.items)if(drafts.get(item.id)===args[0]){drafts.delete(item.id);pending.delete(item.id);item.status='succeeded';item.outputPath=args[1];item.error=undefined;item.canRetrySave=false;}return snapshot();}
     if (action === 'state') return args.length ? failure('无法执行批量整理。') : snapshot();
     if (action === 'cancel') { if (args.length) return failure('无法执行批量整理。'); abort?.abort(); return snapshot(); }
     if (state.status === 'running' || preparing) return failure('已有批量任务正在进行。');
@@ -71,5 +75,5 @@ export function createBatchHandlers(deps: Dependencies): Record<'state' | 'prepa
     }
     return failure('无法执行批量整理。');
   };
-  return { state: handle('state'), prepare: handle('prepare'), start: handle('start'), cancel: handle('cancel'), retry: handle('retry') };
+  return { state: handle('state'), prepare: handle('prepare'), start: handle('start'), cancel: handle('cancel'), retry: handle('retry'),saved:handle('saved') };
 }

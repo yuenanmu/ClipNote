@@ -15,10 +15,11 @@ export interface ReaderDependencies {
   openLink(url: string): Promise<void>;
   catalog?: NoteCatalog;
   sourcePath?(sourceId: string): string | undefined;
+  workspacePath?(id:string):Promise<string>;
 }
-type ReaderAction = 'open' | 'revision' | 'refresh' | 'external' | 'link' | 'noteList' | 'noteAdd' | 'noteOpen' | 'noteRemove' | 'noteRelink' | 'noteSource';
+type ReaderAction = 'open' | 'revision' | 'refresh' | 'external' | 'link' | 'noteList' | 'noteAdd' | 'noteOpen' | 'noteRemove' | 'noteRelink' | 'noteSource' | 'workspace';
 export function createReaderHandlers(dependencies: ReaderDependencies): Record<ReaderAction, (event: unknown, ...args: unknown[]) => Promise<ReaderResult<any>>> {
-  const sessions = new Map<string, { target: ReaderTarget; filePath: string; links: Set<string>; noteId?: string }>();
+  const sessions = new Map<string, { target: ReaderTarget; filePath: string; links: Set<string>; noteId?: string;workspaceId?:string }>();
   let busy = false;
   const failure = (code: ReaderErrorCode): ReaderResult<never> => { const error = new ReaderError(code); return { status: 'error', error: { code: error.code, message: error.message } }; };
   const handler = (action: ReaderAction) => async (event: unknown, ...args: unknown[]): Promise<ReaderResult<any>> => {
@@ -36,10 +37,11 @@ export function createReaderHandlers(dependencies: ReaderDependencies): Record<R
         for (const [id, session] of sessions) if (session.noteId === args[0]) sessions.delete(id);
         return { status: 'ok', value: null };
       }
-      const readerId = ['open', 'revision', 'noteAdd', 'noteOpen', 'noteRelink', 'noteSource'].includes(action) ? randomUUID() : args[0] as string;
+      const readerId = ['open', 'revision', 'noteAdd', 'noteOpen', 'noteRelink', 'noteSource','workspace'].includes(action) ? randomUUID() : args[0] as string;
       const session = sessions.get(readerId);
-      let target: ReaderTarget, noteId = session?.noteId;
+      let target: ReaderTarget, noteId = session?.noteId,workspaceId=session?.workspaceId;
       if (action === 'noteOpen') { noteId = args[0] as string; target = await catalog!.target(noteId); }
+      else if(action==='workspace'){workspaceId=args[0] as string;if(!dependencies.workspacePath)return failure('READER_INVALID_REQUEST');target={kind:'file',path:await dependencies.workspacePath(workspaceId)};}
       else if (action === 'noteSource') {
         const path = dependencies.sourcePath?.(args[0] as string); if (!path) return failure('READER_INVALID_REQUEST'); target = { kind: 'file', path };
       } else if (action === 'open' || action === 'noteAdd' || action === 'noteRelink') {
@@ -49,6 +51,7 @@ export function createReaderHandlers(dependencies: ReaderDependencies): Record<R
       } else if (action === 'revision') target = { kind: 'revision', sourceId: args[0] as string, revisionId: args[1] as string };
       else {
         if (!session) return failure('READER_EXPIRED');
+        if(workspaceId){if(!dependencies.workspacePath)return failure('READER_EXPIRED');session.filePath=await dependencies.workspacePath(workspaceId);session.target={kind:'file',path:session.filePath};}
         if (action === 'external') {
           if (await dependencies.openFile(session.filePath)) return failure('READER_EXTERNAL_FAILED');
           return { status: 'ok', value: null };
@@ -64,11 +67,11 @@ export function createReaderHandlers(dependencies: ReaderDependencies): Record<R
       if (action === 'noteAdd' || action === 'noteSource') noteId = (await catalog!.add(loaded.filePath)).noteId;
       if (action === 'noteRelink') await catalog!.relink(noteId!, loaded.filePath);
       const remembered = target.kind === 'revision' ? { ...target, expectedPath: loaded.filePath } : target;
-      sessions.delete(readerId); sessions.set(readerId, { target: remembered, filePath: loaded.filePath, links: new Set(loaded.content.links), noteId });
+      sessions.delete(readerId); sessions.set(readerId, { target: remembered, filePath: loaded.filePath, links: new Set(loaded.content.links), noteId,workspaceId });
       while (sessions.size > 5) sessions.delete(sessions.keys().next().value!);
       return { status: 'ok', value: { ...loaded, readerId, ...(noteId ? { noteId } : {}) } };
     } catch (error) { return failure(error instanceof ReaderError ? error.code : action === 'link' || action === 'external' ? 'READER_EXTERNAL_FAILED' : 'READER_UNREADABLE'); }
     finally { busy = false; }
   };
-  return Object.fromEntries((['open', 'revision', 'refresh', 'external', 'link', 'noteList', 'noteAdd', 'noteOpen', 'noteRemove', 'noteRelink', 'noteSource'] as ReaderAction[]).map(action => [action, handler(action)])) as Record<ReaderAction, ReturnType<typeof handler>>;
+  return Object.fromEntries((['open', 'revision', 'refresh', 'external', 'link', 'noteList', 'noteAdd', 'noteOpen', 'noteRemove', 'noteRelink', 'noteSource','workspace'] as ReaderAction[]).map(action => [action, handler(action)])) as Record<ReaderAction, ReturnType<typeof handler>>;
 }

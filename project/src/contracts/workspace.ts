@@ -19,7 +19,7 @@ export interface WorkspaceActions {
   trash: { args: [id: string]; value: void };
   trashMany: { args: [ids: string[]]; value: FileOperationResult[] };
   read: { args: [id: string]; value: { text: string; checksum: string } };
-  save: { args: [id: string, checksum: string, text: string]; value: void };
+  save: { args: [id: string, checksum: string, text: string]; value: {checksum:string} };
   import: { args: [id: string]; value: SourceDocument };
   associate: { args: [sourceId: string, noteId: string]; value: void };
 }
@@ -29,6 +29,7 @@ export interface BatchConfig { baseUrl: string; model: string; instructions: str
 export interface BatchItem {
   id: string; name: string; outputName: string; outputPath?: string; overwrite: boolean;
   status: 'queued' | 'running' | 'succeeded' | 'failed' | 'cancelled'; error?: string; canRetrySave?: boolean;
+  timing?:{prepareMs:number;apiMs:number;localMs:number;saveMs:number;requests:number};
 }
 export interface BatchState { status: 'idle' | 'ready' | 'running' | 'done' | 'cancelled'; items: BatchItem[]; baseUrl?: string; model?: string }
 export interface SavedResult { id: string; name: string; sourceName: string; createdAt: string }

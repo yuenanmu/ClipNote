@@ -2,6 +2,12 @@ import { contextBridge, ipcRenderer } from 'electron';
 import type { DesktopApi } from '../contracts/desktop.ts';
 const api: DesktopApi = {
   workspace: (...args: unknown[]) => ipcRenderer.invoke('workspace:action', ...args),
+  onWorkspaceChanged:listener=>{const handler=(_event:unknown,value:Parameters<typeof listener>[0])=>listener(value);ipcRenderer.on('workspace:changed',handler);return()=>ipcRenderer.removeListener('workspace:changed',handler);},
+  savedResults:()=>ipcRenderer.invoke('results:list'),
+  prepareResult:(...args)=>ipcRenderer.invoke('results:prepare',...args),
+  saveResult:(...args)=>ipcRenderer.invoke('results:save',...args),
+  archivePreview:(...args)=>ipcRenderer.invoke('archive:preview',...args),
+  archiveExport:(...args)=>ipcRenderer.invoke('archive:export',...args),
   batchState: (...args: unknown[]) => ipcRenderer.invoke('batch:state', ...args),
   batchPrepare: (...args: unknown[]) => ipcRenderer.invoke('batch:prepare', ...args),
   batchStart: (...args: unknown[]) => ipcRenderer.invoke('batch:start', ...args),
@@ -29,6 +35,7 @@ const api: DesktopApi = {
   resumeSave: (...args: unknown[]) => ipcRenderer.invoke('storage:resume', ...args),
   openRevision: (...args: unknown[]) => ipcRenderer.invoke('storage:open', ...args),
   readerOpen: (...args: unknown[]) => ipcRenderer.invoke('reader:open', ...args),
+  readerWorkspace:(...args:unknown[])=>ipcRenderer.invoke('reader:workspace',...args),
   readerRevision: (...args: unknown[]) => ipcRenderer.invoke('reader:revision', ...args),
   readerRefresh: (...args: unknown[]) => ipcRenderer.invoke('reader:refresh', ...args),
   readerExternal: (...args: unknown[]) => ipcRenderer.invoke('reader:external', ...args),

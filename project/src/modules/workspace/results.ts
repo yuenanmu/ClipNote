@@ -35,8 +35,8 @@ export class NoteResults {
     const token=randomUUID();this.confirmations.set(token,{id,plan});while(this.confirmations.size>100)this.confirmations.delete(this.confirmations.keys().next().value!);
     return {token,name:plan.name,path:plan.notePath,overwrite:plan.exists};
   }
-  async save(token:string):Promise<void>{
+  async save(token:string):Promise<{id:string;path:string}>{
     const selected=this.confirmations.get(token);if(!selected)throw new WorkspaceError('INVALID_REQUEST');const data=await this.read(selected.id);
-    const release=this.files.lockPaths([selected.plan.notePath]);try{await this.files.publish(selected.plan,data.markdown);await this.remove(selected.id);this.confirmations.delete(token);}finally{release();}
+    const release=this.files.lockPaths([selected.plan.notePath]);try{await this.files.publish(selected.plan,data.markdown);await this.remove(selected.id);this.confirmations.delete(token);return {id:selected.id,path:selected.plan.notePath};}finally{release();}
   }
 }

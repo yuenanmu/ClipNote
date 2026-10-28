@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { WorkspaceFiles } from '../../src/modules/workspace/files.ts';
+import { WorkspaceFiles,isWithinWorkspace } from '../../src/modules/workspace/files.ts';
 import { writeAtomic } from '../../src/modules/storage/io.ts';
 
 async function fixture(t: test.TestContext) {
@@ -12,6 +12,10 @@ async function fixture(t: test.TestContext) {
   t.after(async () => { assert.equal(resolve(dirname(own)), resolve(base)); await rm(own, { recursive: true, force: true }); });
   return { own, root, state };
 }
+test('a different drive or network share is never inside the selected Windows root',()=>{
+  if(process.platform!=='win32')return;
+  assert.equal(isWithinWorkspace('D:\\资料','C:\\资料\\file.txt'),false);assert.equal(isWithinWorkspace('D:\\资料','\\\\server\\share\\file.txt'),false);assert.equal(isWithinWorkspace('D:\\资料','D:\\资料\\主题\\file.txt'),true);
+});
 test('workspace retains chosen root and manages actual files without copying originals', async t => {
   const f=await fixture(t); await writeFile(join(f.root, '原文.txt'), '原文'); const service=new WorkspaceFiles(f.state);
   const root=await service.choose('source',f.root); const before=await service.list('source',root.id); const file=before.entries.find(x=>x.name==='原文.txt')!;
@@ -125,4 +129,43 @@ test('external directory changes notify the correct region without exposing raw 
   const stop=service.subscribe(change=>changes.push(change));t.after(stop);await service.list('notes',root.id);await writeFile(join(f.root,'external.md'),'# external');
   for(let n=0;n<50 && !changes.length;n++)await new Promise(resolve=>setTimeout(resolve,20));
   assert.ok(changes.length);assert.deepEqual(Object.keys(changes[0] as object).sort(),['kind','revision']);assert.equal((changes[0] as {kind:string}).kind,'notes');
+});
+
+test('simultaneous publication and unrelated file moves preserve every association',async t=>{
+  const f=await fixture(t),notes=join(f.own,'notes');await mkdir(notes);await writeFile(join(f.root,'a.txt'),'a');await writeFile(join(f.root,'b.txt'),'b');
+  const files=new WorkspaceFiles(f.state),sr=await files.choose('source',f.root),nr=await files.choose('notes',notes),sources=(await files.list('source',sr.id)).entries;
+  const plans=await Promise.all(sources.map(entry=>files.previewOutput(entry.id,nr.id)));await Promise.all(sources.map((entry,index)=>files.writeOutput(entry.id,nr.id,plans[index],'# '+entry.name)));
+  const mappings=JSON.parse(await readFile(join(f.state,'associations.json'),'utf8'));assert.equal(mappings.entries.length,2);
+});
+
+test('moving a folder and its selected descendant moves the descendant only once',async t=>{
+  const f=await fixture(t),files=new WorkspaceFiles(f.state),root=await files.choose('notes',f.root),parent=await files.createDirectory('notes',root.id,'主题'),dest=await files.createDirectory('notes',root.id,'目标'),child=await files.createNote(parent.id,'笔记.md');
+  const result=await files.moveMany('notes',[parent.id,child.id],dest.id);assert.deepEqual(result.map(item=>item.status),['ok','ok']);assert.equal(await readFile(join(f.root,'目标','主题','笔记.md'),'utf8'),'');await assert.rejects(readFile(join(f.root,'目标','笔记.md')));
+});
+
+test('association failure during a move cannot authorize overwriting an unrelated file at the old path',async t=>{
+  const f=await fixture(t),notes=join(f.own,'notes');await mkdir(notes);await writeFile(join(f.root,'a.txt'),'a');let failures=false,writes=0;
+  const files=new WorkspaceFiles(f.state,{writeJson:async(path,data)=>{if(failures && path.endsWith('associations.json') && ++writes===2)throw Object.assign(new Error('full'),{code:'ENOSPC'});await writeAtomic(path,data);}}),sr=await files.choose('source',f.root),nr=await files.choose('notes',notes),source=(await files.list('source',sr.id)).entries[0];
+  await files.writeOutput(source.id,nr.id,await files.previewOutput(source.id,nr.id),'# generated');const note=(await files.list('notes',nr.id)).entries[0],folder=await files.createDirectory('notes',nr.id,'分类');failures=true;
+  await assert.rejects(files.move('notes',note.id,folder.id));await writeFile(join(notes,'a.md'),'unrelated');await assert.rejects(files.previewOutput(source.id,nr.id));assert.equal(await readFile(join(notes,'a.md'),'utf8'),'unrelated');
+});
+
+test('overlapping roots keep both capabilities and both association paths aligned',async t=>{
+  const f=await fixture(t),notes=join(f.root,'notes');await mkdir(notes);await writeFile(join(f.root,'a.txt'),'a');const files=new WorkspaceFiles(f.state),sr=await files.choose('source',f.root),nr=await files.choose('notes',notes),source=(await files.list('source',sr.id)).entries.find(entry=>entry.name==='a.txt')!;
+  await files.writeOutput(source.id,nr.id,await files.previewOutput(source.id,nr.id),'# note');const note=(await files.list('notes',nr.id)).entries[0],asSource=(await files.list('source',(await files.list('source',sr.id)).entries.find(entry=>entry.name==='notes')!.id)).entries[0];await files.rename('source',asSource.id,'renamed.md');
+  assert.equal((await files.previewOutput(source.id,nr.id)).name,'renamed.md');assert.equal(await files.filePath('notes',note.id),join(notes,'renamed.md'));
+});
+
+test('a drive root cannot be switched while a descendant is locked',()=>{
+  if(process.platform!=='win32')return;const files=new WorkspaceFiles('D:\\unused');const release=files.lockPaths(['D:\\notes\\a.md']);assert.throws(()=>files.lockPaths(['D:\\']),{code:'BUSY'});release();
+});
+
+test('failed parent deletion reports its selected descendant as failed too',async t=>{
+  const f=await fixture(t),files=new WorkspaceFiles(f.state),root=await files.choose('notes',f.root),parent=await files.createDirectory('notes',root.id,'parent'),child=await files.createNote(parent.id,'child.md');
+  const results=await files.trashMany('notes',[parent.id,child.id],async()=>{throw Object.assign(new Error('denied'),{code:'EPERM'});});assert.deepEqual(results.map(item=>item.status),['error','error']);
+});
+
+test('opening a search hit observes its unexpanded parent for external changes',async t=>{
+  const f=await fixture(t);await mkdir(join(f.root,'nested'));await writeFile(join(f.root,'nested','searchable.md'),'# initial');const files=new WorkspaceFiles(f.state),root=await files.choose('notes',f.root),changes:unknown[]=[];const stop=files.subscribe(change=>changes.push(change));t.after(stop);await files.list('notes',root.id);
+  const hit=(await files.search('notes','searchable')).entries[0];await files.filePath('notes',hit.id);await new Promise(resolve=>setTimeout(resolve,100));changes.length=0;await writeFile(join(f.root,'nested','searchable.md'),'# external');for(let n=0;n<30 && !changes.length;n++)await new Promise(resolve=>setTimeout(resolve,20));assert.ok(changes.length);
 });

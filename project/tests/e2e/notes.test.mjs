@@ -20,15 +20,15 @@ test('notes workspace persists file registrations and maps Markdown back to prec
   };
   const choose = selected => app.evaluate(({ dialog }, path) => { dialog.showOpenDialog = async () => path ? { canceled: false, filePaths: [path] } : { canceled: true, filePaths: [] }; }, selected);
   t.after(async () => { if (app) await app.close(); assert.equal(resolve(dirname(own)), resolve(base)); rmSync(own, { recursive: true, force: true }); });
-  await launch();
+  await launch();await choose(own);await page.getByRole('button',{name:'打开笔记文件夹',exact:true}).click();
   await t.test('adds Markdown to a dedicated persistent list and cancels without discarding current content', async () => {
     await choose(path); await page.getByRole('button', { name: '添加 Markdown', exact: true }).click();
     await page.getByRole('heading', { name: '思维 笔记.md', exact: true }).waitFor();
     await page.getByRole('button', { name: '选择节点 学习方法', exact: true }).waitFor();
     await choose(undefined); await page.getByRole('button', { name: '添加 Markdown', exact: true }).click(); await page.getByText('已取消 Markdown 选择', { exact: true }).waitFor();
     await choose(path); await page.getByRole('button', { name: '添加 Markdown', exact: true }).click();
-    await page.locator('main[aria-busy="false"]').waitFor();
-    assert.equal(await page.getByRole('button', { name: '打开笔记 思维 笔记.md', exact: true }).count(), 1);
+    await page.locator('main[aria-busy="false"]:visible').waitFor();
+    assert.equal(await page.getByRole('treeitem', { name: '思维 笔记.md', exact: true }).count(), 1);
   });
   await t.test('mindmap folds branches, exposes full paragraph nodes and explicitly jumps to a nested list item', async () => {
     await page.getByRole('button', { name: '展开脑图 先理解', exact: true }).click();
@@ -55,25 +55,22 @@ test('notes workspace persists file registrations and maps Markdown back to prec
   await t.test('switches notes and retains their registrations across a real application restart', async () => {
     await choose(other); await page.getByRole('button', { name: '添加 Markdown', exact: true }).click(); await page.getByRole('heading', { name: '另一份.md', exact: true }).waitFor();
     await app.close(); app = undefined; await launch();
-    await page.getByRole('button', { name: '打开笔记 思维 笔记.md', exact: true }).waitFor();
-    await page.getByRole('button', { name: '打开笔记 另一份.md', exact: true }).click(); await page.getByRole('heading', { name: '另一份.md', exact: true }).waitFor();
+    await page.getByRole('treeitem', { name: '思维 笔记.md', exact: true }).waitFor();
+    await page.getByRole('treeitem', { name: '另一份.md', exact: true }).click(); await page.getByRole('heading', { name: '另一份.md', exact: true }).waitFor();
   });
-  await t.test('a missing path can be relinked and removal only drops the list registration', async () => {
-    const moved = join(own, '移动之后.md'); renameSync(path, moved);
-    await page.getByRole('button', { name: '刷新笔记列表', exact: true }).click();
-    await page.getByText('文件不可用', { exact: true }).waitFor();
-    await page.getByRole('button', { name: '打开笔记 思维 笔记.md', exact: true }).click(); await page.getByRole('alert').waitFor();
-    await page.getByRole('heading', { name: '另一份.md', exact: true }).waitFor();
-    await choose(moved); await page.getByRole('button', { name: '重新关联 思维 笔记.md', exact: true }).click(); await page.getByRole('heading', { name: '移动之后.md', exact: true }).waitFor();
-    await page.getByRole('button', { name: '移出笔记列表 移动之后.md', exact: true }).click();
-    await page.getByRole('button', { name: '打开笔记 移动之后.md', exact: true }).waitFor({ state: 'detached' });
-    assert.equal(readFileSync(moved, 'utf8'), markdown); assert.equal(await page.getByRole('button', { name: '打开笔记 移动之后.md', exact: true }).count(), 0);
+  await t.test('a missing registration can be relinked without removing the actual tree file', async () => {
+    const moved = join(own, '移动之后.md'); renameSync(path,moved);
+    await page.getByRole('treeitem',{name:'移动之后.md',exact:true}).waitFor();
+    const list=await page.evaluate(()=>window.clipnote.noteList()),entry=list.value.find(item=>item.fileName==='思维 笔记.md');assert.equal(entry.available,false);
+    await choose(moved);const relinked=await page.evaluate(id=>window.clipnote.noteRelink(id),entry.noteId);assert.equal(relinked.status,'ok');
+    await page.getByRole('treeitem',{name:'移动之后.md',exact:true}).click();await page.getByRole('heading',{name:'移动之后.md',exact:true}).waitFor();
+    assert.equal((await page.evaluate(id=>window.clipnote.noteRemove(id),entry.noteId)).status,'ok');assert.equal(readFileSync(moved,'utf8'),markdown);assert.equal(await page.getByRole('treeitem',{name:'移动之后.md',exact:true}).count(),1);
   });
   await t.test('imported MD can enter the notes workspace and repeated list nodes jump across Markdown pages', async () => {
-    await page.getByRole('button', { name: '返回文件工作台', exact: true }).click();
+    await page.getByRole('button', { name: '文件导入', exact: true }).click();
     const long = join(own, '长正文.md'); writeFileSync(long, '普通段落。\n\n'.repeat(110) + '- 重复要点\n- 重复要点');
-    await choose(long); await page.getByRole('button', { name: '导入文件', exact: true }).click(); await page.getByRole('heading', { name: '长正文.md', exact: true }).waitFor();
-    await page.getByRole('button', { name: '加入笔记区', exact: true }).click(); await page.getByRole('button', { name: 'Mindmap', exact: true }).click();
+    await choose(long); await page.getByRole('button', { name: '打开文件', exact: true }).click(); await page.getByRole('heading', { name: '长正文.md', exact: true }).waitFor();
+    await page.getByRole('button', { name: '阅读 Markdown', exact: true }).click(); await page.getByRole('button', { name: 'Mindmap', exact: true }).click();
     await page.getByRole('button', { name: '查看全图', exact: true }).click();
     await page.getByRole('button', { name: '选择节点 重复要点', exact: true }).nth(1).click();
     await page.getByRole('button', { name: '查看 Markdown', exact: true }).click();

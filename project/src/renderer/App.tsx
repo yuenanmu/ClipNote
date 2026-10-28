@@ -1,251 +1,68 @@
-import { useEffect, useRef, useState } from 'react';
-import type { DesktopApi } from '../contracts/desktop.ts';
-import type { SourceDocument } from '../contracts/source.ts';
-import type { LibraryState, SavedRevision } from '../contracts/storage.ts';
-import { LibrarySidebar } from './LibrarySidebar.tsx';
-import { WorkspaceTree } from './WorkspaceTree.tsx';
-import { BatchPanel } from './BatchPanel.tsx';
-import { NotesWorkspace } from './features/reader/NotesWorkspace.tsx';
-import { ApiSettings } from './features/api/ApiSettings.tsx';
-import type { NoteEntry, ReaderDocument } from '../contracts/reader.ts';
-import type { ReaderResult } from '../contracts/desktop.ts';
-import type { WorkflowState } from '../contracts/workflow.ts';
-
-declare global { interface Window { clipnote: DesktopApi } }
-const PAGE_SIZE = 100;
-const RAW_PREVIEW_LIMIT = 200_000;
-const INSTRUCTIONS_KEY = 'clipnote.analysis.instructions';
-const paths = {
-  file: 'M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z M14 2v6h6 M8 13h8 M8 17h5',
-  plus: 'M12 5v14 M5 12h14',
-  layers: 'M12 3 2 8l10 5 10-5-10-5z M2 12l10 5 10-5 M2 16l10 5 10-5',
-  shield: 'M12 3 3 7v6c0 5 9 9 9 9s9-4 9-9V7z M8 12l3 3 5-6',
-  link: 'M10 13a5 5 0 0 0 7 0l3-3a5 5 0 0 0-7-7l-2 2 M14 11a5 5 0 0 0-7 0l-3 3a5 5 0 0 0 7 7l2-2',
-};
-function Icon({ name = 'file', size = 20 }: { name?: keyof typeof paths; size?: number }) {
-  return <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d={paths[name]} /></svg>;
-}
-function time(milliseconds: number): string {
-  const total = Math.floor(milliseconds / 1000);
-  const hours = Math.floor(total / 3600);
-  return `${hours ? `${String(hours).padStart(2, '0')}:` : ''}${String(Math.floor(total / 60) % 60).padStart(2, '0')}:${String(total % 60).padStart(2, '0')}.${String(milliseconds % 1000).padStart(3, '0')}`;
-}
-
-export function App() {
-  const [documents, setDocuments] = useState<SourceDocument[]>([]);
-  const [activeId, setActiveId] = useState<string>();
-  const [selected, setSelected] = useState(0);
-  const [view, setView] = useState<'segments' | 'raw'>('segments');
-  const [page, setPage] = useState(0);
-  const [rawPage, setRawPage] = useState(0);
-  const rawMark = useRef<HTMLElement>(null);
-  const [busy, setBusy] = useState(true);
-  const [library, setLibrary] = useState<LibraryState>({ directory: null, revisions: [], drafts: [], warnings: [] });
-  const [savedVersion, setSavedVersion] = useState<SavedRevision>();
-  const [notice, setNotice] = useState<{ text: string; error?: boolean }>();
-  const [readerDocument, setReaderDocument] = useState<ReaderDocument>();
-  const [showReader, setShowReader] = useState(false);
-  const [showApi, setShowApi] = useState(false);
-  const [workflow, setWorkflow] = useState<WorkflowState>({ status: 'idle', completedChunks: 0 });
-  const [instructions, setInstructions] = useState(() => { try { return (window.localStorage.getItem(INSTRUCTIONS_KEY) ?? '').slice(0, 1000); } catch { return ''; } });
-  const [batchIds, setBatchIds] = useState<string[]>([]);
-  const [workspaceSources, setWorkspaceSources] = useState<Record<string, string>>({});
-  const [workspaceSourceId, setWorkspaceSourceId] = useState<string>();
-  const [batchOpenRequest, setBatchOpenRequest] = useState(0);
-  const [proposal, setProposal] = useState<{ sourceId: string; fileName: string; baseUrl: string; model: string }>();
-  const [noteEntries, setNoteEntries] = useState<NoteEntry[]>([]);
-  const document = documents.find(item => item.sourceId === activeId);
-  const segment = document?.segments[selected];
-  const rawStart = rawPage * RAW_PREVIEW_LIMIT;
-  const rawEnd = Math.min(rawStart + RAW_PREVIEW_LIMIT, document?.rawText.length ?? 0);
-  const highlightStart = Math.max(rawStart, segment?.range.startOffset ?? rawStart);
-  const highlightEnd = Math.min(rawEnd, segment?.range.endOffset ?? rawStart);
-  useEffect(() => { if (view === 'raw') rawMark.current?.scrollIntoView({ block: 'center' }); }, [view, selected, rawPage, activeId]);
-  const openOriginal = () => { setRawPage(Math.floor((segment?.range.startOffset ?? 0) / RAW_PREVIEW_LIMIT)); setView('raw'); };
-
-  const selectDocument = (source: SourceDocument) => { setShowReader(false); setActiveId(source.sourceId); setWorkspaceSourceId(workspaceSources[source.sourceId]); setSelected(0); setPage(0); setRawPage(0); setView('segments'); setNotice(undefined); setSavedVersion(undefined); setProposal(undefined); };
-  const addDocument = (source: SourceDocument) => { setDocuments(previous => [source, ...previous.filter(item => item.sourceId !== source.sourceId)].slice(0, 5)); selectDocument(source); };
-  const refreshLibrary = async () => {
-    const result = await window.clipnote.libraryState();
-    if (result.status !== 'ok') throw new Error('Library unavailable');
-    setLibrary(result.value);
+import {useEffect,useRef,useState} from 'react';
+import type {DesktopApi,ReaderResult} from '../contracts/desktop.ts';
+import type {SourceDocument} from '../contracts/source.ts';
+import type {ReaderDocument} from '../contracts/reader.ts';
+import type {WorkspaceEntry} from '../contracts/workspace.ts';
+import {WorkspaceTree} from './WorkspaceTree.tsx';
+import {BatchPanel} from './BatchPanel.tsx';
+import {SourceWorkspace} from './SourceWorkspace.tsx';
+import {ArchivePanel} from './ArchivePanel.tsx';
+import {FileIcon,ToolButton} from './FileIcon.tsx';
+import {workspaceValue,unwrap} from './workspace-api.ts';
+import {ReaderView} from './features/reader/ReaderView.tsx';
+import {ApiSettings} from './features/api/ApiSettings.tsx';
+declare global {interface Window {clipnote:DesktopApi}}
+interface EditSession {id:string;name:string;text:string;baseText:string;checksum:string;conflict?:boolean}
+export function App(){
+  const [area,setArea]=useState<'source'|'notes'>('source'),[api,setApi]=useState(false),[archive,setArchive]=useState(false),[source,setSource]=useState<SourceDocument>(),[sourceId,setSourceId]=useState<string>();
+  const [note,setNote]=useState<ReaderDocument>(),[noteId,setNoteId]=useState<string>(),[edit,setEdit]=useState<EditSession>(),[notice,setNotice]=useState<{text:string;error?:boolean}>(),[loading,setLoading]=useState(false),[saving,setSaving]=useState(false);
+  const [batchIds,setBatchIds]=useState<string[]>([]),[openRequest,setOpenRequest]=useState(0),[aiRunning,setAiRunning]=useState(false),[confirmLeave,setConfirmLeave]=useState(false);
+  const [width,setWidth]=useState(()=>{try{const value=Number(window.localStorage.getItem('clipnote.explorer.width'));return value>=230 && value<=480?value:280;}catch{return 280;}});
+  const savePending=useRef(false);
+  const nextAction=useRef<(()=>void)|undefined>(undefined),dragging=useRef(false),readQueue=useRef<Promise<unknown>>(Promise.resolve()),request=useRef(0);
+  const latest=useRef({sourceId,noteId,note,edit,area});latest.current={sourceId,noteId,note,edit,area};
+  const reader=<T,>(run:()=>Promise<ReaderResult<T>>):Promise<T>=>{const operation=readQueue.current.then(run,run).then(unwrap);readQueue.current=operation.catch(()=>{});return operation;};
+  const run=async(action:()=>Promise<void>)=>{setLoading(true);setNotice(undefined);try{await action();}catch(e){setNotice({text:e instanceof Error?e.message:'操作未完成，请重试。',error:true});}finally{setLoading(false);}};
+  const navigate=(action:()=>void)=>{const current=latest.current.edit;if(current && current.text!==current.baseText){nextAction.current=action;setConfirmLeave(true);}else action();};
+  const refreshNote=async()=>{const current=latest.current.note;if(current){const value=await reader(()=>window.clipnote.readerRefresh(current.readerId));if(latest.current.note?.readerId===current.readerId)setNote(old=>old && old.checksum===value.checksum?old.filePath===value.filePath && old.fileName===value.fileName?old:{...old,filePath:value.filePath,fileName:value.fileName}:value);}};
+  const openNote=(entry:WorkspaceEntry,editing=false)=>navigate(()=>void run(async()=>{const sequence=++request.current;const value=await reader(()=>window.clipnote.readerWorkspace(entry.id));if(sequence!==request.current)return;setArea('notes');setNote(value);setNoteId(entry.id);setEdit(undefined);if(editing){const text=await workspaceValue('notes','read',entry.id);setEdit({id:entry.id,name:entry.name,...text,baseText:text.text});}}));
+  const openSource=(entry:WorkspaceEntry)=>navigate(()=>void run(async()=>{const sequence=++request.current,value=await workspaceValue('source','import',entry.id);if(sequence!==request.current)return;setArea('source');setEdit(undefined);setSource(value);setSourceId(entry.id);}));
+  const importFile=async()=>{await run(async()=>{const result=await window.clipnote.importSource();if(result.status==='cancelled'){setNotice({text:'已取消选择'});return;}if(result.status==='error')throw new Error(result.error.message);setSource(result.document);setSourceId(result.entryId);setArea('source');setBatchIds(result.entryId?[result.entryId]:[]);});};
+  const openMarkdown=()=>navigate(()=>void run(async()=>{const result=await window.clipnote.noteAdd();if(result.status==='cancelled'){setNotice({text:'已取消 Markdown 选择'});return;}const value=unwrap(result);setNote(value);setNoteId(undefined);setEdit(undefined);setArea('notes');}));
+  const editCurrent=()=>{if(noteId && note)openNote({id:noteId,name:note.fileName,kind:'file'},true);};
+  const readSourceMarkdown=()=>{if(source)navigate(()=>void run(async()=>{setNote(await reader(()=>window.clipnote.noteSource(source.sourceId)));setNoteId(undefined);setEdit(undefined);setArea('notes');}));};
+  const save=async()=>{
+    const snapshot=latest.current.edit;if(!snapshot)return true;if(savePending.current)return false;savePending.current=true;setSaving(true);
+    try{const committed=await workspaceValue('notes','save',snapshot.id,snapshot.checksum,snapshot.text),disk=await workspaceValue('notes','read',snapshot.id);const conflict=disk.checksum!==committed.checksum;
+      setEdit(current=>current?.id===snapshot.id?{...current,checksum:committed.checksum,baseText:snapshot.text,conflict}:current);
+      const clean=latest.current.edit?.id===snapshot.id && latest.current.edit.text===snapshot.text;
+      setNotice({text:conflict?'文件在保存后又被外部修改，请确认磁盘内容。':clean?'笔记已保存。':'已保存提交的内容；新输入仍未保存。',error:conflict});await refreshNote();return clean && !conflict;
+    }catch(e){setNotice({text:e instanceof Error?e.message:'保存失败。',error:true});return false;}finally{savePending.current=false;setSaving(false);}
   };
-  const refreshNotes = async () => {
-    const result = await window.clipnote.noteList();
-    if (result.status === 'ok') setNoteEntries(result.value);
-    else if (result.status === 'error') setNotice({ text: result.error.message, error: true });
-  };
-  useEffect(() => {
-    if (workflow.status !== 'running' && workflow.status !== 'saving') return;
-    let active = true; const timer = setInterval(() => { void window.clipnote.workflowState().then(async result => {
-      if (!active || result.status !== 'ok') return; setWorkflow(result.value);
-      if (!['running', 'saving'].includes(result.value.status)) { setBusy(false); if (result.value.status === 'succeeded') { try { await refreshLibrary(); } catch { setNotice({ text: '笔记已保存，但版本列表刷新失败。', error: true }); } } }
-    }).catch(() => { if (active) { setBusy(false); setNotice({ text: '无法读取分析状态，请重试。', error: true }); } }); }, 400);
-    return () => { active = false; clearInterval(timer); };
-  }, [workflow.status]);
-  useEffect(() => {
-    let active = true;
-    window.clipnote.libraryState().then(result => {
-      if (result.status !== 'ok') throw new Error('Library unavailable');
-      if (active) setLibrary(result.value);
-    }).catch(() => { if (active) setNotice({ text: '暂时无法读取归档信息。', error: true }); }).finally(() => { if (active) setBusy(false); });
-    return () => { active = false; };
-  }, []);
-  const storageAction = async (action: () => Promise<void>) => {
-    if (busy) return; setBusy(true); setNotice(undefined);
-    try { await action(); } catch { setNotice({ text: '保存操作暂时不可用，请重试。', error: true }); }
-    finally {
-      try { await refreshLibrary(); }
-      catch { setNotice({ text: '归档列表刷新失败，请稍后重试；请以操作本身的保存回执为准。', error: true }); }
-      finally { setBusy(false); }
-    }
-  };
-  const chooseDirectory = async () => {
-    const result = await window.clipnote.chooseLibrary();
-    if (result.status === 'ok') { setLibrary(result.value); return true; }
-    setNotice(result.status === 'cancelled' ? { text: '已取消目录选择' } : { text: result.error.message, error: true }); return false;
-  };
-  const prepareAnalysis = async () => {
-    if (busy || !document) return; setBusy(true); setNotice(undefined);
-    if (workspaceSourceId) { setBatchIds([workspaceSourceId]); setBatchOpenRequest(value => value + 1); setBusy(false); return; }
-    try { if (!library.directory && !await chooseDirectory()) return; const config = await window.clipnote.apiState();
-      if (config.status === 'error') { setNotice({ text: config.error.message, error: true }); return; }
-      if (!config.value.configured) { setNotice({ text: '请先在 API 设置中配置服务和模型。', error: true }); return; }
-      setProposal({ sourceId: document.sourceId, fileName: document.fileName, baseUrl: config.value.baseUrl, model: config.value.model });
-    } catch { setNotice({ text: '无法准备分析，请重试。', error: true }); } finally { setBusy(false); }
-  };
-  const startAnalysis = async () => {
-    if (busy || !proposal) return; setBusy(true); setNotice(undefined);
-    try { const response = await window.clipnote.workflowStart(proposal.sourceId, { baseUrl: proposal.baseUrl, model: proposal.model, instructions });
-      if (response.status === 'error') { setNotice({ text: response.error.message, error: true }); setBusy(false); return; }
-      setProposal(undefined); setWorkflow(response.value); if (!['running','saving'].includes(response.value.status)) setBusy(false);
-    } catch { setBusy(false); setNotice({ text: '无法启动分析，请重试。', error: true }); }
-  };
-  const retryAnalysisSave = async () => {
-    if (busy) return; setBusy(true); try { const response = await window.clipnote.workflowRetrySave(); if (response.status === 'ok') { setWorkflow(response.value); if (!['running','saving'].includes(response.value.status)) setBusy(false); } else { setNotice({ text: response.error.message, error: true }); setBusy(false); } } catch { setBusy(false); setNotice({ text: '无法重试保存。', error: true }); }
-  };
-  const saveSource = async () => {
-    if (!document) return;
-    if (!library.directory && !await chooseDirectory()) return;
-    const result = await window.clipnote.saveSource(document.sourceId);
-    if (result.status === 'ok') { setSavedVersion(result.value); setNotice({ text: '来源已保存，已创建独立版本。' }); }
-    else if (result.status === 'error') setNotice({ text: result.error.message, error: true });
-  };
-  const resume = async (draftId: string) => {
-    if (!library.directory && !await chooseDirectory()) return;
-    const result = await window.clipnote.resumeSave(draftId);
-    if (result.status === 'ok') { setSavedVersion(result.value); setNotice({ text: '保存重试完成。' }); }
-    else if (result.status === 'error') setNotice({ text: result.error.message, error: true });
-  };
-  const openVersion = async (revision: SavedRevision) => {
-    const result = await window.clipnote.openRevision(revision.sourceId, revision.revisionId);
-    if (result.status === 'ok') { addDocument(result.value.document); setSavedVersion(result.value.revision); setNotice({ text: result.value.revision.noteModified ? '已打开来源；此版本的笔记有外部修改，将保留原样。' : '已从归档打开完整来源。' }); }
-    else if (result.status === 'error') setNotice({ text: result.error.message, error: true });
-  };
-  const importFile = async () => {
-    if (busy) return;
-    setBusy(true); setNotice(undefined);
-    try {
-      const result = await window.clipnote.importSource();
-      if (result.status === 'cancelled') { setNotice({ text: '已取消选择' }); return; }
-      if (result.status === 'error') { setNotice({ text: result.error.message, error: true }); return; }
-      const source = result.document;
-      addDocument(source);
-    } catch { setNotice({ text: '导入连接暂时不可用，请重试。', error: true }); }
-    finally { setBusy(false); }
-  };
-
-  const readerAction = async (action: () => Promise<void>) => {
-    if (busy) return; setBusy(true); setNotice(undefined);
-    try { await action(); } catch { setNotice({ text: '阅读操作暂时不可用，请重试。', error: true }); }
-    finally { setBusy(false); }
-  };
-  const acceptReader = (result: ReaderResult<ReaderDocument>) => {
-    if (result.status === 'ok') { setReaderDocument(result.value); setShowReader(true); }
-    else setNotice(result.status === 'cancelled' ? { text: '已取消 Markdown 选择' } : { text: result.error.message, error: true });
-  };
-  const openMarkdown = () => void readerAction(async () => { acceptReader(await window.clipnote.noteAdd()); await refreshNotes(); });
-  const readVersion = (revision: SavedRevision) => void readerAction(async () => { acceptReader(await window.clipnote.readerRevision(revision.sourceId, revision.revisionId)); await refreshNotes(); });
-  const noteOpen = (id: string) => void readerAction(async () => { acceptReader(await window.clipnote.noteOpen(id)); await refreshNotes(); });
-  const noteRelink = (id: string) => void readerAction(async () => { acceptReader(await window.clipnote.noteRelink(id)); await refreshNotes(); });
-  const noteRemove = (id: string) => void readerAction(async () => {
-    const result = await window.clipnote.noteRemove(id);
-    if (result.status === 'ok') { if (readerDocument?.noteId === id) setReaderDocument(undefined); setNotice({ text: '已移出笔记列表，原文件保留。' }); }
-    else if (result.status === 'error') setNotice({ text: result.error.message, error: true });
-    await refreshNotes();
-  });
-  const enterNotes = () => { setShowReader(true); void readerAction(async () => { await refreshNotes(); await refreshLibrary(); }); };
-  const noteFromSource = () => { if (document) void readerAction(async () => { acceptReader(await window.clipnote.noteSource(document.sourceId)); await refreshNotes(); }); };
-  const readerExternal = (url?: string) => void readerAction(async () => {
-    if (!readerDocument) return;
-    const result = url ? await window.clipnote.readerLink(readerDocument.readerId, url) : await window.clipnote.readerExternal(readerDocument.readerId);
-    if (result.status === 'error') setNotice({ text: result.error.message, error: true });
-  });
-
-  if (showApi) return <ApiSettings onBack={() => setShowApi(false)} />;
-  if (showReader) return <NotesWorkspace document={readerDocument} entries={noteEntries} revisions={library.revisions} busy={busy} notice={notice} onAdd={openMarkdown} onOpen={noteOpen} onRemove={noteRemove} onRelink={noteRelink} onListRefresh={() => void readerAction(async () => { await refreshNotes(); await refreshLibrary(); })} onRevision={readVersion} onBack={() => { setShowReader(false); setNotice(undefined); }} onRefresh={() => void readerAction(async () => { if (readerDocument) acceptReader(await window.clipnote.readerRefresh(readerDocument.readerId)); await refreshNotes(); })} onExternal={() => readerExternal()} onExternalLink={readerExternal} workspace={<WorkspaceTree kind="notes" disabled={busy} onOpen={source => void readerAction(async () => { acceptReader(await window.clipnote.noteSource(source.sourceId)); await refreshNotes(); })} />} />;
-
-  return <div className="app-shell">
-    <aside className="sidebar">
-      <div className="brand"><span className="brand-mark"><Icon size={21} /></span>ClipNote</div>
-      <p className="brand-subtitle">让资料成为思路</p>
-      <div className="nav-current"><Icon name="layers" size={17} />文件导入<span className="nav-dot" /></div>
-      <button className="notes-nav-button" disabled={busy} onClick={enterNotes}><Icon name="file" size={17} />笔记</button>
-      <button className="notes-nav-button" disabled={busy} onClick={() => setShowApi(true)}><Icon name="shield" size={17} />API 设置</button>
-      <WorkspaceTree kind="source" disabled={busy} onOpen={(source, entryId) => { addDocument(source); setWorkspaceSources(old => ({ ...old, [source.sourceId]: entryId })); setWorkspaceSourceId(entryId); }} selectedIds={batchIds} onToggle={(id, checked) => setBatchIds(old => checked ? old.length < 100 ? [...old, id] : old : old.filter(value => value !== id))} onClear={() => { setBatchIds([]); setWorkspaceSources({}); setWorkspaceSourceId(undefined); }} />
-      <p className="session-title">本次会话</p>
-      <div className="session-files">
-        {!documents.length && <p className="session-empty">导入的资料会显示在这里。<br />从一份字幕或文本开始。</p>}
-        {documents.map(source => <button key={source.sourceId} disabled={busy} className={`session-file ${source.sourceId === activeId ? 'selected' : ''}`} onClick={() => selectDocument(source)} title={source.fileName}>
-          <Icon size={16} /><span><b>{source.fileName}</b><small>{source.format.toUpperCase()} · {source.segments.length} 个片段</small></span>
-        </button>)}
-      </div>
-      <LibrarySidebar library={library} busy={busy} onOpen={revision => void storageAction(() => openVersion(revision))} onRead={readVersion} onResume={draftId => void storageAction(() => resume(draftId))} />
-      <footer className="sidebar-footer"><div className="local-status"><i />本地工作台</div><p>未保存资料关闭后清空。<br />已归档版本可重新打开。</p></footer>
+  useEffect(()=>{const key=(event:globalThis.KeyboardEvent)=>{if((event.ctrlKey || event.metaKey) && event.key.toLowerCase()==='s' && latest.current.edit){event.preventDefault();void save();}};const before=(event:BeforeUnloadEvent)=>{const value=latest.current.edit;if(value && value.text!==value.baseText){event.preventDefault();event.returnValue='';}};window.addEventListener('keydown',key);window.addEventListener('beforeunload',before);return()=>{window.removeEventListener('keydown',key);window.removeEventListener('beforeunload',before);};},[]);
+  useEffect(()=>{let alive=true,timer:ReturnType<typeof setTimeout>|undefined;const stop=window.clipnote.onWorkspaceChanged(change=>{clearTimeout(timer);timer=setTimeout(()=>{void (async()=>{const state=latest.current;if(change.kind==='source' && state.sourceId){const value=await workspaceValue('source','import',state.sourceId);if(alive && state.sourceId===latest.current.sourceId)setSource(value);}if(change.kind==='notes' && state.note){if(state.edit){const disk=await workspaceValue('notes','read',state.edit.id),entry=await workspaceValue('notes','entry',state.edit.id);if(!alive || state.edit.id!==latest.current.edit?.id)return;setEdit(current=>{if(!current)return current;if(current.text!==current.baseText)return {...current,name:entry.name,conflict:disk.checksum!==current.checksum};return {...current,...disk,name:entry.name,baseText:disk.text,conflict:false};});}await refreshNote();}})().catch(()=>{if(alive)setNotice({text:'当前文件已移动、删除或暂不可读；保留当前内容，请确认磁盘位置。',error:true});});},160);});return()=>{alive=false;clearTimeout(timer);stop();};},[]);
+  const changeArea=(value:'source'|'notes')=>navigate(()=>{setEdit(undefined);setArea(value);setNotice(undefined);});
+  const size=(value:number)=>setWidth(Math.max(230,Math.min(480,value)));
+  if(api)return <ApiSettings onBack={()=>setApi(false)}/>;
+  return <div className="app-shell file-shell" style={{gridTemplateColumns:`${width}px 5px minmax(0,1fr)`}}>
+    <aside className="file-sidebar"><div className="file-brand"><span><FileIcon size={23}/></span><strong>ClipNote</strong></div><nav className="file-areas" aria-label="工作区"><button aria-label="文件导入" aria-current={area==='source'?'page':undefined} onClick={()=>changeArea('source')}><FileIcon name="layers"/>资料</button><button aria-current={area==='notes'?'page':undefined} onClick={()=>changeArea('notes')}><FileIcon/>笔记</button><ToolButton label="API 设置" icon="settings" onClick={()=>navigate(()=>setApi(true))}/></nav>
+      <div className="file-explorer-slot" hidden={area!=='source'}><WorkspaceTree onRequestRootChange={navigate} kind="source" onOpen={openSource} onSelectionChange={entries=>setBatchIds(entries.filter(entry=>entry.kind==='file').map(entry=>entry.id))} onClear={()=>{setSource(undefined);setSourceId(undefined);setBatchIds([]);}}/></div>
+      <div className="file-explorer-slot" hidden={area!=='notes'}><WorkspaceTree onRequestRootChange={navigate} kind="notes" onOpen={entry=>openNote(entry)} onEdit={entry=>openNote(entry,true)} onClear={()=>{setNote(undefined);setNoteId(undefined);setEdit(undefined);}}/></div>
+      <footer className="file-sidebar-bottom"><span><i/>本地文件</span><button onClick={()=>navigate(()=>setArchive(true))}><FileIcon name="archive"/>旧归档</button></footer>
     </aside>
-    <main className="desktop" aria-busy={busy}>
-      <header className="toolbar"><div><p className="eyebrow">工作台 / 文件导入</p><h1 title={document?.fileName}>{document?.fileName ?? '文件导入'}</h1><p className="toolbar-caption">{document ? '保留来源，核对每一个片段。' : '把字幕与文本，带到同一个工作台。'}</p></div>
-        <div className="toolbar-actions">{document?.format === 'md' && <button className="secondary" disabled={busy} onClick={noteFromSource}>加入笔记区</button>}<button className="secondary" disabled={busy || !document} onClick={() => void storageAction(saveSource)}>保存来源</button><button className="secondary" disabled={busy || !document} onClick={() => void prepareAnalysis()}>AI 整理</button><button className="primary" disabled={busy} onClick={() => void importFile()}><Icon name="plus" size={16} />{busy ? '正在处理…' : '导入文件'}</button></div>
-      </header>
-      <div className="library-bar"><span title={library.directory ?? ''}>{library.directory ? `保存目录：${library.directory}` : '选择本地目录，归档后可在重启时重新打开。'}</span><button disabled={busy} onClick={() => void storageAction(async () => { await chooseDirectory(); })}>{library.directory ? '更改目录' : '选择保存目录'}</button></div>
-      <BatchPanel ids={batchIds} instructions={instructions} disabled={busy} onBusy={setBusy} openRequest={batchOpenRequest} />
-      {notice && <div className={`notice ${notice.error ? 'error' : ''}`} role={notice.error ? 'alert' : 'status'}>{notice.text}</div>}
-      {!!library.warnings.length && <div className="library-warning" role="status">{library.warnings[0]}</div>}
-      {proposal && <section className="analysis-confirm" aria-label="确认发送资料"><strong>确认发送资料</strong><p>将「{proposal.fileName}」的内容发送至 {proposal.baseUrl}，使用模型 {proposal.model} 整理。内容可能分多次发送；遇到输出截断会拆小重试，增加请求次数和费用。</p><label>补充整理要求（选填）<textarea aria-label="补充整理要求" maxLength={1000} value={instructions} onChange={event => setInstructions(event.target.value)} placeholder="例如：重点整理操作步骤，保留示例" /></label><p>默认规则会保留来源引用；补充要求也会发送给所选服务。</p><div><button className="secondary" disabled={busy} onClick={() => { try { window.localStorage.setItem(INSTRUCTIONS_KEY, instructions); setNotice({ text: '补充要求已保存到本机。' }); } catch { setNotice({ text: '无法保存补充要求。', error: true }); } }}>保存补充要求</button><button className="secondary" disabled={busy} onClick={() => { try { window.localStorage.removeItem(INSTRUCTIONS_KEY); setInstructions(''); setNotice({ text: '已恢复默认整理要求。' }); } catch { setNotice({ text: '无法恢复默认要求。', error: true }); } }}>恢复默认</button><button className="primary" disabled={busy} onClick={() => void startAnalysis()}>确认发送并整理</button><button className="secondary" disabled={busy} onClick={() => setProposal(undefined)}>取消</button></div></section>}
-      {workflow.status !== 'idle' && <section className="analysis-status" role="status"><strong>{workflow.status === 'running' ? `正在整理 · 已完成 ${workflow.completedChunks} 个分块` : workflow.status === 'saving' ? '正在保存笔记…' : workflow.status === 'succeeded' ? '笔记整理并保存完成' : workflow.status === 'cancelled' ? '已取消整理，来源仍保留。' : '整理或保存未完成'}</strong>{workflow.error && <p>{workflow.error.message}</p>}{workflow.status === 'running' && <button className="secondary" onClick={() => void window.clipnote.workflowCancel()}>取消整理</button>}{workflow.canRetrySave && <button className="secondary" disabled={busy} onClick={() => void retryAnalysisSave()}>重试保存</button>}{workflow.status === 'succeeded' && workflow.revision && <button className="secondary" disabled={busy} onClick={() => readVersion(workflow.revision!)}>阅读生成笔记</button>}</section>}
-      {workflow.timing && !['running', 'saving'].includes(workflow.status) && <p className="preview-note" role="status">本次耗时：准备 {(workflow.timing.prepareMs / 1000).toFixed(1)} 秒 · API 请求与响应 {(workflow.timing.apiMs / 1000).toFixed(1)} 秒（{workflow.timing.requests} 次） · 本地校验与生成 {(workflow.timing.localMs / 1000).toFixed(1)} 秒 · 保存 {(workflow.timing.saveMs / 1000).toFixed(1)} 秒</p>}
-      <div className="content-layout">
-        <section className="workspace" aria-label="来源工作区">
-          {!document ? <div className="welcome">
-            <p className="eyebrow">从来源开始</p><h2>从一份资料开始。</h2><p className="intro">导入字幕或文本，查看内容与来源位置。<br />先把原文完整留下，再向下一步出发。</p>
-            <div className="import-card"><div className="document-art"><Icon size={43} /></div><h3>选择字幕或文本</h3><p>支持带时间的字幕，也支持已有文字资料。</p>
-              <button className="primary" disabled={busy} onClick={() => void importFile()}><Icon name="plus" size={17} />{busy ? '正在处理…' : '选择本地文件'}</button>
-              <div className="formats">{['SRT', 'VTT', 'TXT', 'MD'].map(format => <span key={format}>{format}</span>)}</div><p className="size-note">单文件不超过 16 MiB</p>
-            </div>
-            <div className="benefits"><div className="benefit"><strong><Icon size={14} />保留原文</strong><p>原始内容与换行保持完整，<br />不会修改你选择的文件。</p></div><div className="benefit"><strong><Icon name="link" size={14} />按片段定位</strong><p>字幕对应真实时间，<br />文本对应原文行号。</p></div><div className="benefit"><strong><Icon name="shield" size={14} />本地处理</strong><p>导入和查看无需登录，<br />不向外部服务发送资料。</p></div></div>
-          </div> : <>
-            <div className="source-head"><span className="format-badge">{document.format.toUpperCase()}</span><span>{document.segments.length.toLocaleString()} 个来源片段 · {document.rawText.length.toLocaleString()} 字符 · {document.encoding.toUpperCase()}</span></div>
-            <div className="view-tabs"><button className={view === 'segments' ? 'active' : ''} aria-pressed={view === 'segments'} onClick={() => setView('segments')}>来源片段</button><button className={view === 'raw' ? 'active' : ''} aria-pressed={view === 'raw'} onClick={openOriginal}>原始文本</button></div>
-            {view === 'raw' ? <>
-              {document.rawText.length > RAW_PREVIEW_LIMIT && <p className="preview-note">原文较长，分为 {Math.ceil(document.rawText.length / RAW_PREVIEW_LIMIT)} 页显示。当前为第 {rawStart + 1}–{rawEnd} 字符，内容未删减。</p>}
-              <pre className="raw-source" data-testid="raw-source">{highlightStart < highlightEnd ? <>{document.rawText.slice(rawStart, highlightStart)}<mark ref={rawMark}>{document.rawText.slice(highlightStart, highlightEnd)}</mark>{document.rawText.slice(highlightEnd, rawEnd)}</> : document.rawText.slice(rawStart, rawEnd)}</pre>
-              {document.rawText.length > RAW_PREVIEW_LIMIT && <div className="pagination"><button disabled={!rawPage} onClick={() => setRawPage(value => value - 1)}>上一页</button><span>原文第 {rawPage + 1} / {Math.ceil(document.rawText.length / RAW_PREVIEW_LIMIT)} 页</span><button disabled={rawEnd >= document.rawText.length} onClick={() => setRawPage(value => value + 1)}>下一页</button></div>}
-            </> : <>
-              <div className="source-list">{document.segments.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE).map((item, index) => <button key={item.segmentId} className={`segment ${selected === page * PAGE_SIZE + index ? 'active' : ''}`} aria-label={`定位片段 ${item.order}`} aria-pressed={selected === page * PAGE_SIZE + index} onClick={() => setSelected(page * PAGE_SIZE + index)}>
-                <div className="segment-meta"><span>片段 {String(item.order).padStart(2, '0')}</span><span className="time">{item.startMs !== undefined ? `${time(item.startMs)} — ${time(item.endMs!)}` : `第 ${item.range.startLine}–${item.range.endLine} 行`}</span></div>
-                <p>{item.text.slice(0, 1000)}</p>{item.text.length > 1000 && <small>长片段，此处预览前 1,000 字符；完整内容见原始文本。</small>}
-              </button>)}</div>
-              {document.segments.length > PAGE_SIZE && <div className="pagination"><button disabled={!page} onClick={() => setPage(value => value - 1)}>上一页</button><span>第 {page + 1} / {Math.ceil(document.segments.length / PAGE_SIZE)} 页 · 每页 {PAGE_SIZE} 个片段</span><button disabled={(page + 1) * PAGE_SIZE >= document.segments.length} onClick={() => setPage(value => value + 1)}>下一页</button></div>}
-            </>}
-          </>}
-        </section>
-        <aside className="inspector"><h2>来源概览</h2>{!document ? <div className="inspector-placeholder"><Icon name="layers" size={33} /><p>导入后，在这里查看<br />文件信息与原文位置。</p></div> : <>
-          <dl><dt>来源格式</dt><dd>{document.format.toUpperCase()} · 本地文件</dd><dt>文本编码</dt><dd>{document.encoding.toUpperCase()}</dd><dt>片段数量</dt><dd>{document.segments.length.toLocaleString()} 个</dd><dt>原始位置</dt><dd className="path">{document.originalPath}</dd><dt>来源校验</dt><dd className="path" title={document.checksum}>{document.checksum.slice(0, 16)}…</dd></dl>
-          {savedVersion?.sourceId === document.sourceId && <div className="saved-location"><strong>已保存 · {savedVersion.kind === 'source-archive' ? '原文归档，未进行 AI 整理' : '笔记版本'}</strong><p>{savedVersion.notePath}</p></div>}
-          <div className="inspector-divider" />
-          {segment && <><h2>片段 {String(segment.order).padStart(2, '0')} · 原文依据</h2><p className="source-location" data-testid="source-location">第 {segment.range.startLine}–{segment.range.endLine} 行{segment.startMs !== undefined ? ` · ${time(segment.startMs)}` : ''}</p><pre className="excerpt">{segment.text.slice(0, 600)}</pre>{segment.text.length > 600 && <p className="preview-note">此处显示片段开头，完整内容见原始文本。</p>}<button className="original-link" onClick={openOriginal}>查看原文位置</button></>}
-        </>}</aside>
-      </div>
-    </main>
+    <div className="file-sidebar-divider" role="separator" aria-label="调整文件侧栏宽度" aria-orientation="vertical" aria-valuemin={230} aria-valuemax={480} aria-valuenow={width} tabIndex={0} onPointerDown={event=>{dragging.current=true;event.currentTarget.setPointerCapture(event.pointerId);}} onPointerMove={event=>{if(dragging.current)size(event.clientX);}} onPointerUp={event=>{dragging.current=false;if(event.currentTarget.hasPointerCapture(event.pointerId))event.currentTarget.releasePointerCapture(event.pointerId);try{window.localStorage.setItem('clipnote.explorer.width',String(width));}catch{}}} onPointerCancel={()=>{dragging.current=false;}} onKeyDown={event=>{if(event.key==='ArrowLeft' || event.key==='ArrowRight'){event.preventDefault();size(width+(event.key==='ArrowLeft'?-16:16));}}}/>
+    <div className="file-content">
+      <main className="desktop source-desktop" hidden={area!=='source'} aria-busy={loading}><header className="toolbar"><div><p className="eyebrow">资料 / 本地文件</p><h1 title={source?.fileName}>{source?.fileName??'文件导入'}</h1><p className="toolbar-caption">打开真实文件，按主题组织资料。</p></div><div className="toolbar-actions">{source?.format==='md' && <button className="secondary" onClick={readSourceMarkdown}>阅读 Markdown</button>}<button className="secondary" disabled={!sourceId || aiRunning} onClick={()=>{if(batchIds.length<2 && sourceId)setBatchIds([sourceId]);setOpenRequest(value=>value+1);}}>AI 整理</button><button className="primary" onClick={()=>navigate(()=>void importFile())}><FileIcon name="folderOpen"/>打开文件</button></div></header>
+        <BatchPanel ids={batchIds} instructions={(()=>{try{return window.localStorage.getItem('clipnote.analysis.instructions')??'';}catch{return '';}})()} onBusy={setAiRunning} openRequest={openRequest}/>
+        {area==='source' && notice && <div className={`notice ${notice.error?'error':''}`} role={notice.error?'alert':'status'}>{notice.text}</div>}<SourceWorkspace document={source} importFile={importFile} busy={loading}/>
+      </main>
+      <section className="notes-main" hidden={area!=='notes'}>
+        {edit?<section className="note-editor-pane" aria-label="Markdown 编辑区"><header className="reader-toolbar"><div><p className="eyebrow">笔记 / 编辑{edit.text!==edit.baseText?' · 未保存':''}</p><h1>{edit.name}</h1></div><div className="reader-actions"><button className="secondary" onClick={()=>navigate(()=>{setEdit(undefined);void run(refreshNote);})}>阅读</button><button className="primary" disabled={saving} onClick={()=>void save()}>保存笔记</button></div></header>{edit.conflict && <div className="notice error" role="alert">文件已被外部修改，当前输入仍保留。保存会检查冲突。<button className="quiet" onClick={()=>navigate(()=>void run(async()=>{const disk=await workspaceValue('notes','read',edit.id);setEdit({...edit,...disk,baseText:disk.text,conflict:false});}))}>重新载入磁盘内容</button></div>}{notice && <div className={`notice ${notice.error?'error':''}`} role={notice.error?'alert':'status'}>{notice.text}</div>}<textarea className="note-editor-text" aria-label="编辑 Markdown" spellCheck={false} value={edit.text} onChange={event=>setEdit({...edit,text:event.target.value})}/><footer>UTF-8 · Ctrl+S 保存 · 编辑原文件</footer></section>:
+        note?<ReaderView embedded document={note} busy={loading} notice={notice} onOpen={openMarkdown} onBack={()=>changeArea('source')} onRefresh={()=>void run(refreshNote)} onExternal={()=>void run(async()=>{unwrap(await window.clipnote.readerExternal(note.readerId));})} onExternalLink={url=>void run(async()=>{unwrap(await window.clipnote.readerLink(note.readerId,url));})} onEdit={noteId?editCurrent:undefined}/>:
+        <div className="notes-welcome"><header className="toolbar"><div><p className="eyebrow">笔记 / 本地文件夹</p><h1>笔记</h1></div><button className="secondary" onClick={openMarkdown}>添加 Markdown</button></header><div><FileIcon name="folderOpen" size={48}/><h2>打开笔记，展开思路。</h2><p>从左侧选择 Markdown，或新建一份笔记。<br/>你看到和编辑的就是磁盘上的文件。</p>{area==='notes' && notice && <p role="alert">{notice.text}</p>}</div></div>}
+      </section>
+    </div>
+    {archive && <ArchivePanel onClose={()=>setArchive(false)} onRevision={revision=>navigate(()=>void run(async()=>{setNote(await reader(()=>window.clipnote.readerRevision(revision.sourceId,revision.revisionId)));setNoteId(undefined);setEdit(undefined);setArea('notes');}))} onNote={id=>navigate(()=>void run(async()=>{setNote(await reader(()=>window.clipnote.noteOpen(id)));setNoteId(undefined);setEdit(undefined);setArea('notes');}))}/>}
+    {confirmLeave && <div className="file-dialog-shade"><section className="file-dialog" role="dialog" aria-modal="true" aria-label="未保存的修改"><h3>笔记还有未保存的修改</h3><p>离开前保存，或放弃本次修改。</p><footer><button className="secondary" onClick={()=>{nextAction.current=undefined;setConfirmLeave(false);}}>继续编辑</button><button className="secondary" onClick={()=>{setConfirmLeave(false);setEdit(undefined);const action=nextAction.current;nextAction.current=undefined;action?.();}}>放弃更改</button><button className="primary" disabled={saving} onClick={()=>void (async()=>{if(await save()){setConfirmLeave(false);const action=nextAction.current;nextAction.current=undefined;action?.();}})()}>保存并继续</button></footer></section></div>}
   </div>;
 }
