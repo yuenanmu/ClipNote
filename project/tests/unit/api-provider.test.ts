@@ -32,7 +32,7 @@ test('short reference identifiers reduce repeated model output while preserving 
   assert.deepEqual(requestCore.map(ref => ref.segmentId), ['s1', 's2']);
   assert.ok(oldLength - outputLength >= 250); assert.deepEqual(value.sourceRefs, tiny.segments.map(item => item.segmentId));
   assert.deepEqual(value.outline.sections[0].refs.map(ref => ref.segmentId), tiny.segments.map(item => item.segmentId));
-  assert.ok(value.markdown.includes('clipnote-source:'));
+  assert.ok(!value.markdown.includes('clipnote-source:'));
 });
 test('unknown compact identifiers still fail reference validation', async t => {
   const base = await server(t, (_req, res) => { const refs = [{ segmentId: 's999', startOffset: 0, endOffset: 1 }]; send(res, JSON.stringify({ title: '笔记', sections: [{ heading: '章节', refs, items: [{ kind: 'point', text: '要点', refs, children: [] }] }] })); });

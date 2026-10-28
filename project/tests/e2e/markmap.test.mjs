@@ -110,7 +110,7 @@ test('Markmap remains readable and split reading keeps independent view state wi
     await page.getByRole('button', { name: '大纲', exact: true }).click(); await page.getByRole('button', { name: '定位标题 Nested heading', exact: true }).click();
     await page.getByRole('button', { name: '选择节点 Nested heading', exact: true }).click();
     assert.equal(await page.getByRole('button', { name: 'Mindmap', exact: true }).getAttribute('aria-pressed'), 'true');
-    await page.getByRole('button', { name: '查看原文', exact: true }).click();
+    await page.getByRole('button', { name: '查看 Markdown', exact: true }).click();
     assert.equal(await page.getByTestId('reader-body').locator('[data-reader-anchor="nested-heading"]').evaluate(e => e === document.activeElement), true);
   });
   await t.test('a representative note has readable chapter and split views with persistent article highlighting', async () => {

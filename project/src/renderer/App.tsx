@@ -174,22 +174,9 @@ export function App() {
     const result = url ? await window.clipnote.readerLink(readerDocument.readerId, url) : await window.clipnote.readerExternal(readerDocument.readerId);
     if (result.status === 'error') setNotice({ text: result.error.message, error: true });
   });
-  const readerSource = (segmentId?: string) => void readerAction(async () => {
-    if (!readerDocument?.archive) return;
-    const { sourceId, revisionId } = readerDocument.archive;
-    const result = await window.clipnote.openRevision(sourceId, revisionId);
-    if (result.status === 'error') { setNotice({ text: result.error.message, error: true }); return; }
-    if (result.status !== 'ok') return;
-    const source = result.value.document, index = segmentId ? source.segments.findIndex(item => item.segmentId === segmentId) : 0;
-    if (index < 0) { setNotice({ text: '来源引用不存在，已保留当前阅读。', error: true }); return; }
-    addDocument(source); setSavedVersion(result.value.revision);
-    setSelected(index); setPage(Math.floor(index / PAGE_SIZE));
-    if (segmentId) { setRawPage(Math.floor(source.segments[index].range.startOffset / RAW_PREVIEW_LIMIT)); setView('raw'); }
-    setNotice({ text: '已定位归档来源，可核对原文与实际位置。' });
-  });
 
   if (showApi) return <ApiSettings onBack={() => setShowApi(false)} />;
-  if (showReader) return <NotesWorkspace document={readerDocument} entries={noteEntries} revisions={library.revisions} busy={busy} notice={notice} onAdd={openMarkdown} onOpen={noteOpen} onRemove={noteRemove} onRelink={noteRelink} onListRefresh={() => void readerAction(async () => { await refreshNotes(); await refreshLibrary(); })} onRevision={readVersion} onBack={() => { setShowReader(false); setNotice(undefined); }} onRefresh={() => void readerAction(async () => { if (readerDocument) acceptReader(await window.clipnote.readerRefresh(readerDocument.readerId)); await refreshNotes(); })} onExternal={() => readerExternal()} onExternalLink={readerExternal} onSource={readerSource} />;
+  if (showReader) return <NotesWorkspace document={readerDocument} entries={noteEntries} revisions={library.revisions} busy={busy} notice={notice} onAdd={openMarkdown} onOpen={noteOpen} onRemove={noteRemove} onRelink={noteRelink} onListRefresh={() => void readerAction(async () => { await refreshNotes(); await refreshLibrary(); })} onRevision={readVersion} onBack={() => { setShowReader(false); setNotice(undefined); }} onRefresh={() => void readerAction(async () => { if (readerDocument) acceptReader(await window.clipnote.readerRefresh(readerDocument.readerId)); await refreshNotes(); })} onExternal={() => readerExternal()} onExternalLink={readerExternal} />;
 
   return <div className="app-shell">
     <aside className="sidebar">

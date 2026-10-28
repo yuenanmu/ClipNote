@@ -47,9 +47,14 @@ test('file workflow asks before sending and saves readable independent revisions
   await page.getByText('笔记整理并保存完成').waitFor(); assert.equal(calls, 3); await page.getByText(/本次耗时：准备/).waitFor();
   const finished = await page.evaluate(() => window.clipnote.workflowState()); assert.equal(finished.value.timing.requests, 3); assert.ok(finished.value.timing.apiMs >= 100); assert.ok(finished.value.timing.saveMs >= 0);
   let library = await libraryState(); assert.equal(library.revisions.length, 1);
-  const first = library.revisions[0]; assert.match(readFileSync(first.notePath, 'utf8'), /测试笔记内容/); assert.equal(readFileSync(first.sourcePath, 'utf8'), original);
+  const first = library.revisions[0]; assert.match(readFileSync(first.notePath, 'utf8'), /测试笔记内容/); assert.doesNotMatch(readFileSync(first.notePath, 'utf8'), /clipnote-source:|↗来源|段落\d+ · 字符/); assert.equal(readFileSync(first.sourcePath, 'utf8'), original);
   await page.getByRole('button', { name: '阅读生成笔记' }).click(); await page.getByRole('button', { name: '展开全部' }).click(); await page.getByRole('button', { name: /选择节点 测试笔记内容/ }).first().click();
-  await page.getByRole('button', { name: /回查来源 1/ }).click(); await page.getByTestId('source-location').waitFor(); writeFileSync(first.notePath, '人工编辑，不能覆盖');
+  assert.equal(await page.getByRole('button', { name: /回查来源|查看来源/ }).count(), 0); await page.getByRole('button', { name: '查看 Markdown', exact: true }).click(); await page.getByText('测试笔记内容').first().waitFor();
+  await page.getByRole('button', { name: '返回文件工作台' }).click();
+  const legacy = `# 旧笔记\n\n## 旧章节 [↗来源 段落1 · 字符1–2](clipnote-source:${encodeURIComponent(first.sourceId + ':1')})\n\n- 保留正文 [↗来源 段落1 · 字符1–2](clipnote-source:${encodeURIComponent(first.sourceId + ':1')})\n`;
+  writeFileSync(first.notePath, legacy); await page.getByRole('button', { name: '阅读生成笔记' }).click(); await page.getByRole('button', { name: 'Markdown', exact: true }).click();
+  await page.getByText('保留正文').waitFor(); assert.doesNotMatch(await page.getByTestId('reader-body').innerText(), /↗来源|段落1 · 字符/); assert.equal(readFileSync(first.notePath, 'utf8'), legacy);
+  await page.getByRole('button', { name: '返回文件工作台' }).click(); writeFileSync(first.notePath, '人工编辑，不能覆盖');
   await page.getByRole('button', { name: 'AI 整理' }).click(); await page.getByRole('button', { name: '确认发送并整理' }).click();
   for (let i = 0; i < 100 && calls < 4; i++) await page.waitForTimeout(100);
   await page.getByText('正在整理', { exact: false }).first().waitFor({ state: 'hidden' });

@@ -9,7 +9,7 @@ export function MarkdownBody({ document, start, end, activeId, onLink }: { docum
   while (pending.length) { const node = pending.pop()!; if (node.type === 'definition') definitions.set(node.identifier.toLowerCase(), node); if ('children' in node) pending.push(...node.children); }
   const link = (url: string, children: ReactNode, key: string): ReactNode => {
     const action = classifyLink(url, document.content, document.archive);
-    return <button className="reader-link" key={key} disabled={action.kind === 'blocked'} title={action.kind === 'blocked' ? '此链接未开放，未访问文件或网络' : url} onClick={() => onLink(action)}>{children}</button>;
+    return <button className="reader-link" key={key} disabled={action.kind === 'blocked' || action.kind === 'source'} title={action.kind === 'blocked' || action.kind === 'source' ? '此链接未开放' : url} onClick={() => onLink(action)}>{children}</button>;
   };
   const render = (node: Nodes, key: string): ReactNode => {
     const id = (node.data as { readerId?: string })?.readerId;

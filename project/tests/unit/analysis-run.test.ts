@@ -17,10 +17,10 @@ test('custom instructions change the plan and are sent with required reference r
   const s = source('依据'); const a = planAnalysis(s, { ...profile, instructions: '保留操作示例' } as any); const b = planAnalysis(s, { ...profile, instructions: '突出关键步骤' } as any);
   assert.notEqual(a.planId, b.planId); assert.match(a.chunks[0].request, /保留操作示例/); assert.match(a.chunks[0].request, /refs/);
 });
-test('generated mindmap uses natural labels and keeps source links available in Markdown', () => {
+test('generated Markdown and mindmap use natural labels without source links', () => {
   const s = source('依据'); const refs = [{ segmentId: s.segments[0].segmentId, startOffset: 0, endOffset: 2 }];
   const md = renderMarkdown(outline(refs, '核心内容'), s); const content = parseMarkdown(md);
-  assert.doesNotMatch(md, /要点：|依据：/); assert.match(md, /clipnote-source:/);
+  assert.doesNotMatch(md, /要点：|依据：|clipnote-source:|↗来源|段落\d+ · 字符/);
   const labels: string[] = []; const visit = (node: any) => { labels.push(node.label); node.children.forEach(visit); }; visit(content.mindmap);
   assert.ok(labels.some(label => label.includes('核心内容'))); assert.ok(labels.every(label => !label.includes('↗来源')));
 });
@@ -71,10 +71,10 @@ test('overlap duplicates merge only when kind, exact text and evidence agree; un
 test('Markdown uses chapters and nested evidence lists, escapes injection and derives real times only from source', () => {
   const s = parseSource(Buffer.from('1\r\n00:00:01,230 --> 00:00:03,000\r\n真实字幕'), '合成.srt'); const refs = [{ segmentId: s.segments[0].segmentId, startOffset: 0, endOffset: 2 }];
   const value = outline(refs, '<script>x</script>\n# 伪标题 [危险](https://invalid.test)'); value.sections[0].items[0].children.push({ kind: 'limitation', text: '限制', refs, children: [] });
-  const md = renderMarkdown(value, s); assert.ok(md.includes('00:00:01.230')); assert.ok(!md.includes('<script>')); assert.ok(!md.includes('\n# 伪标题')); assert.ok(md.includes('  - 限制 '));
+  const md = renderMarkdown(value, s); assert.ok(!md.includes('00:00:01.230')); assert.ok(!md.includes('<script>')); assert.ok(!md.includes('\n# 伪标题')); assert.ok(md.includes('  - 限制'));
   const parsed = parseMarkdown(md); assert.equal(parsed.headings.length, 1); assert.equal(parsed.headings[0].children.length, 1); assert.ok(parsed.mindmap.children[0].children[0].children.some(n => n.kind === 'listItem'));
   assert.equal(renderMarkdown(value, s), md);
-  const txt = source('普通段落'); const txtMd = renderMarkdown(outline([{ segmentId: txt.segments[0].segmentId, startOffset: 0, endOffset: 4 }]), txt); assert.ok(txtMd.includes('段落1')); assert.ok(!txtMd.includes('00:00:'));
+  const txt = source('普通段落'); const txtMd = renderMarkdown(outline([{ segmentId: txt.segments[0].segmentId, startOffset: 0, endOffset: 4 }]), txt); assert.ok(!txtMd.includes('段落1')); assert.ok(!txtMd.includes('00:00:'));
 });
 test('oversized model output fails without a repair call or partial success', async () => {
   const s = source('原文'); let calls = 0;
@@ -87,7 +87,7 @@ test('bare URLs and emails in model prose remain text and cannot consume generat
     const value = outline(refs, prose); value.title = prose; value.sections[0].heading = prose;
     const parsed = parseMarkdown(renderMarkdown(value, s)); const links: string[] = [];
     const walk = (node: any) => { if (node.type === 'link') links.push(node.url); for (const child of node.children ?? []) walk(child); }; walk(parsed.root);
-    assert.equal(links.length, 2, prose); assert.ok(links.every(url => url.startsWith('clipnote-source:')), prose);
+    assert.equal(links.length, 0, prose);
   }
 });
 
