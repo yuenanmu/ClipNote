@@ -1,5 +1,7 @@
 # M06 Markdown 阅读
 
+本轮重做按[文件夹体验计划](../superpowers/plans/2026-10-28-folder-experience.md)：普通笔记直接通过受控文件 ID 打开，主区域编辑与阅读切换；原目录登记列表收至单独旧内容入口，文件树成为主导航。仍保留脑图与 Markdown 定位。
+
 ## 职责与边界
 
 T15/T16 开发分支支持选择普通笔记根目录、浏览和管理真实目录、创建及编辑 Markdown，并检测外部修改冲突；保留旧归档阅读。范围和安全边界见[实施计划](../superpowers/plans/2026-10-28-file-management-batch.md)，未完成项见任务清单。

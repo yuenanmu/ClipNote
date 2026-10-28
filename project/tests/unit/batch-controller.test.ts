@@ -31,3 +31,11 @@ test('a target changed after preview is rejected before any model request', asyn
   let version='old', calls=0; const h=createBatchHandlers({ isTrustedSender:()=>true, config:async()=>config, preview:async(id:string)=>({sourcePath:id,notePath:id+'.md',name:id+'.md',exists:true,checksum:version}), analyze:async()=>{calls++;return {markdown:'# 笔记'};}, save:async()=>{} });
   await h.prepare('trusted',[ids[0]],target,config); version='new'; assert.equal((await h.start('trusted')).status,'error'); assert.equal(calls,0);
 });
+
+test('batch retains generated results before saving and releases only its own locks',async()=>{
+  let staged=0,completed=0,locked=0,released=0;const h=createBatchHandlers({isTrustedSender:()=>true,config:async()=>config,
+    preview:async(id:string)=>({sourcePath:id,notePath:id+'.md',name:'a.md',exists:false}),analyze:async()=>({markdown:'# durable'}),
+    lock:plans=>{assert.equal(plans.length,1);locked++;return()=>{released++;};},stage:async(_plan,text)=>{assert.equal(text,'# durable');staged++;return ids[1];},complete:async id=>{assert.equal(id,ids[1]);completed++;},
+    save:async()=>{assert.equal(staged,1);}});
+  await h.prepare('trusted',[ids[0]],target,config);await h.start('trusted');await until(h,'done');assert.equal(staged,1);assert.equal(completed,1);assert.equal(locked,1);assert.equal(released,1);
+});

@@ -4,6 +4,7 @@ import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promis
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { WorkspaceFiles } from '../../src/modules/workspace/files.ts';
+import { writeAtomic } from '../../src/modules/storage/io.ts';
 
 async function fixture(t: test.TestContext) {
   const base = fileURLToPath(new URL('../../../.local/test-artifacts/', import.meta.url)); await mkdir(base, { recursive: true });
@@ -70,4 +71,58 @@ test('explicit relinking handles externally moved notes without guessing ownersh
   const source=(await service.list('source',sourceRoot.id)).entries[0], note=(await service.list('notes',noteRoot.id)).entries[0];
   await service.associate(source.id,note.id); const plan=await service.previewOutput(source.id,noteRoot.id); assert.equal(plan.name,'已有.md'); assert.equal(plan.exists,true);
   assert.equal(await readFile(join(notes,'已有.md'),'utf8'),'人工内容');
+});
+
+test('regeneration follows the associated note after moving it to a theme folder', async t => {
+  const f=await fixture(t), notes=join(f.own,'notes'); await mkdir(notes); await writeFile(join(f.root,'资料.txt'),'合成');
+  const service=new WorkspaceFiles(f.state), sourceRoot=await service.choose('source',f.root), noteRoot=await service.choose('notes',notes);
+  const source=(await service.list('source',sourceRoot.id)).entries[0]; const plan=await service.previewOutput(source.id,noteRoot.id); await service.writeOutput(source.id,noteRoot.id,plan,'# 第一版');
+  const note=(await service.list('notes',noteRoot.id)).entries[0], theme=await service.createDirectory('notes',noteRoot.id,'主题 A'); await service.move('notes',note.id,theme.id);
+  const again=await service.previewOutput(source.id,noteRoot.id); assert.equal(again.notePath,join(notes,'主题 A','资料.md')); await service.writeOutput(source.id,noteRoot.id,again,'# 第二版');
+  assert.equal(await readFile(join(notes,'主题 A','资料.md'),'utf8'),'# 第二版');
+});
+
+test('an explicitly opened source can be analyzed without granting its parent directory', async t => {
+  const f=await fixture(t), service=new WorkspaceFiles(f.state); await writeFile(join(f.root,'outside.txt'),'原文');
+  const entry=await service.registerSource(join(f.root,'outside.txt')); assert.equal(await service.filePath('source',entry.id),join(f.root,'outside.txt'));
+  assert.equal(await service.root('source'),undefined); await assert.rejects(service.list('source',entry.id)); await assert.rejects(service.rename('source',entry.id,'changed.txt'));
+});
+
+test('multi-item moves report collisions separately and only active files are locked', async t => {
+  const f=await fixture(t); await writeFile(join(f.root,'a.md'),'a'); await writeFile(join(f.root,'b.md'),'b');
+  const service=new WorkspaceFiles(f.state), root=await service.choose('notes',f.root), list=await service.list('notes',root.id), folder=await service.createDirectory('notes',root.id,'分类');
+  await writeFile(join(f.root,'分类','a.md'),'keep'); const moved=await service.moveMany('notes',list.entries.map(x=>x.id),folder.id);
+  assert.deepEqual(moved.map(x=>x.status),['error','ok']); assert.equal(await readFile(join(f.root,'分类','a.md'),'utf8'),'keep');
+  const release=service.lockPaths([join(f.root,'a.md')]); await assert.rejects(service.rename('notes',list.entries[0].id,'locked.md'),{code:'BUSY'});
+  await service.createNote(root.id,'unrelated.md'); await assert.rejects(service.choose('notes',f.root),{code:'BUSY'}); release(); await service.rename('notes',list.entries[0].id,'free.md');
+});
+
+test('only a verified legacy library is hidden, never an ordinary folder named ClipNote', async t => {
+  const f=await fixture(t); await mkdir(join(f.root,'ClipNote')); const service=new WorkspaceFiles(f.state), root=await service.choose('notes',f.root);
+  assert.ok((await service.list('notes',root.id)).entries.some(x=>x.name==='ClipNote'));
+  await writeFile(join(f.root,'ClipNote','.clipnote-library.json'),JSON.stringify({schemaVersion:1,app:'ClipNote',libraryId:'11111111-1111-4111-8111-111111111111'}));
+  assert.ok(!(await service.list('notes',root.id)).entries.some(x=>x.name==='ClipNote'));
+  assert.equal((await service.search('notes','ClipNote')).entries.length,0);
+});
+
+test('5,000 supported files are paged without rendering or losing all entries at once', async t => {
+  const f=await fixture(t); for(let n=0;n<5000;n+=100) await Promise.all(Array.from({length:100},(_,i)=>writeFile(join(f.root,`${String(n+i).padStart(5,'0')}.md`),'x')));
+  const service=new WorkspaceFiles(f.state), root=await service.choose('notes',f.root); const first=await service.list('notes',root.id), last=await service.list('notes',root.id,4900);
+  assert.equal(first.total,5000); assert.equal(first.entries.length,100); assert.equal(last.entries.length,100); assert.equal(last.entries.at(-1)?.name,'04999.md');
+});
+
+test('a published note whose association write failed can resume across service restart', async t => {
+  const f=await fixture(t), notes=join(f.own,'notes'); await mkdir(notes); await writeFile(join(f.root,'资料.txt'),'合成'); let fail=false;
+  const service=new WorkspaceFiles(f.state,{writeJson:async(path,data)=>{ if(fail && path.endsWith('associations.json')) throw Object.assign(new Error('disk'),{code:'ENOSPC'}); await writeAtomic(path,data); }});
+  const s=await service.choose('source',f.root), n=await service.choose('notes',notes), source=(await service.list('source',s.id)).entries[0], plan=await service.previewOutput(source.id,n.id);
+  fail=true; await assert.rejects(service.writeOutput(source.id,n.id,plan,'# 生成结果')); assert.equal(await readFile(join(notes,'资料.md'),'utf8'),'# 生成结果');
+  const restarted=new WorkspaceFiles(f.state), sr=await restarted.root('source'), nr=await restarted.root('notes'), reopened=(await restarted.list('source',sr!.id)).entries[0];
+  await restarted.writeOutput(reopened.id,nr!.id,plan,'# 生成结果'); assert.equal((await restarted.previewOutput(reopened.id,nr!.id)).exists,true);
+});
+
+test('external directory changes notify the correct region without exposing raw paths',async t=>{
+  const f=await fixture(t),service=new WorkspaceFiles(f.state),root=await service.choose('notes',f.root);const changes:unknown[]=[];
+  const stop=service.subscribe(change=>changes.push(change));t.after(stop);await service.list('notes',root.id);await writeFile(join(f.root,'external.md'),'# external');
+  for(let n=0;n<50 && !changes.length;n++)await new Promise(resolve=>setTimeout(resolve,20));
+  assert.ok(changes.length);assert.deepEqual(Object.keys(changes[0] as object).sort(),['kind','revision']);assert.equal((changes[0] as {kind:string}).kind,'notes');
 });
