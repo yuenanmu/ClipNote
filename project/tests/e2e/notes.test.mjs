@@ -47,7 +47,7 @@ test('notes workspace persists file registrations and maps Markdown back to prec
     assert.notEqual(await page.getByTestId('mindmap-canvas').getAttribute('data-scale'), before); await page.getByRole('button', { name: '查看全图', exact: true }).click();
     await page.screenshot({ path: join(base, 'notes-mindmap.png') });
     await page.getByRole('button', { name: '选择节点 找到证据', exact: true }).click();
-    await page.getByRole('button', { name: '查看原文', exact: true }).click();
+    await page.getByRole('button', { name: '查看 Markdown', exact: true }).click();
     assert.equal(await page.getByRole('button', { name: 'Markdown', exact: true }).getAttribute('aria-pressed'), 'true');
     assert.match(await page.evaluate(() => document.activeElement?.textContent), /找到证据/);
     assert.equal(await page.getByRole('button', { name: '定位标题 代码不是分支', exact: true }).count(), 0);
@@ -76,7 +76,7 @@ test('notes workspace persists file registrations and maps Markdown back to prec
     await page.getByRole('button', { name: '加入笔记区', exact: true }).click(); await page.getByRole('button', { name: 'Mindmap', exact: true }).click();
     await page.getByRole('button', { name: '查看全图', exact: true }).click();
     await page.getByRole('button', { name: '选择节点 重复要点', exact: true }).nth(1).click();
-    await page.getByRole('button', { name: '查看原文', exact: true }).click();
+    await page.getByRole('button', { name: '查看 Markdown', exact: true }).click();
     await page.getByTestId('reader-body').getByRole('listitem').nth(1).waitFor();
     assert.equal(await page.getByTestId('reader-body').getByRole('listitem').nth(1).evaluate(e => e === document.activeElement), true);
     await page.screenshot({ path: join(base, 'notes-markdown.png') });

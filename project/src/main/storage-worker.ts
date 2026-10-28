@@ -10,6 +10,7 @@ async function run() {
     case 'state': return service.state();
     case 'choose': return service.chooseDirectory(data.parent);
     case 'save': return service.save(data.snapshot, archiveMarkdown(data.snapshot.document), { kind: 'source-archive' });
+    case 'save-generated': return service.save(data.snapshot, data.markdown, data.metadata);
     case 'resume': return service.resume(data.draftId);
     case 'open': return service.open(data.sourceId, data.revisionId);
     default: throw new StorageError('INVALID_REQUEST');

@@ -7,10 +7,10 @@ import { boundSplitRatio, readSplitRatio, SPLIT_PREFERENCE } from './split-prefe
 import './reader.css';
 const PAGE_SIZE = 100;
 type ReadingMode = 'markdown' | 'mindmap' | 'split';
-export function ReaderView({ document: note, navigation, busy, notice, onOpen, onBack, onRefresh, onExternal, onExternalLink, onSource }: {
+export function ReaderView({ document: note, navigation, busy, notice, onOpen, onBack, onRefresh, onExternal, onExternalLink }: {
   navigation?: ReactNode;
   document: ReaderDocument; busy: boolean; notice?: { text: string; error?: boolean };
-  onOpen(): void; onBack(): void; onRefresh(): void; onExternal(): void; onExternalLink(url: string): void; onSource(segmentId?: string): void;
+  onOpen(): void; onBack(): void; onRefresh(): void; onExternal(): void; onExternalLink(url: string): void;
 }) {
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set()), [page, setPage] = useState(0), [active, setActive] = useState<string>();
   const [target, setTarget] = useState<ReaderPosition>(), [mapFocus, setMapFocus] = useState<ReaderPosition>();
@@ -41,7 +41,7 @@ export function ReaderView({ document: note, navigation, busy, notice, onOpen, o
     if (mode !== 'markdown') setMapFocus({ ...position });
   };
   const find = (id: string) => { const pending = [...note.content.headings]; while (pending.length) { const heading = pending.pop()!; if (heading.id === id) { jump(heading); return; } pending.push(...heading.children); } };
-  const onLink = (link: ReaderLink) => { if (link.kind === 'anchor') find(link.id); else if (link.kind === 'source') onSource(link.segmentId); else if (link.kind === 'external') onExternalLink(link.url); };
+  const onLink = (link: ReaderLink) => { if (link.kind === 'anchor') find(link.id); else if (link.kind === 'external') onExternalLink(link.url); };
   const tree = (headings: ReaderHeading[]) => <ul>{headings.map(heading => <li key={heading.id}>
     <div className={`outline-row ${active === heading.id ? 'active' : ''}`}>
       {heading.children.length ? <button className="outline-toggle" aria-expanded={!collapsed.has(heading.id)} aria-label={`${collapsed.has(heading.id) ? '展开' : '收起'} ${heading.title}`} onClick={() => setCollapsed(previous => { const next = new Set(previous); next.has(heading.id) ? next.delete(heading.id) : next.add(heading.id); return next; })}>{collapsed.has(heading.id) ? '›' : '⌄'}</button> : <span className="outline-spacer" />}
@@ -61,7 +61,7 @@ export function ReaderView({ document: note, navigation, busy, notice, onOpen, o
       <p className="reader-offline"><i />本地阅读 · 无需登录</p>
     </aside>
     <main className="reader-main" aria-busy={busy}>
-      <header className="reader-toolbar"><div><p className="eyebrow">{note.archive ? '笔记 / 归档版本' : '笔记 / 本地文件'}</p><h1 title={note.fileName}>{note.fileName}</h1><p className="reader-file-path" title={note.filePath}>{note.filePath}</p></div><div className="reader-actions"><button className="secondary" disabled={busy} onClick={onOpen}>添加 Markdown</button><button className="secondary" disabled={busy} onClick={onRefresh}>刷新文件</button><button className="secondary" disabled={busy} onClick={onExternal}>外部打开</button>{note.archive && <button className="primary" disabled={busy} onClick={() => onSource()}>查看来源</button>}</div></header>
+      <header className="reader-toolbar"><div><p className="eyebrow">{note.archive ? '笔记 / 归档版本' : '笔记 / 本地文件'}</p><h1 title={note.fileName}>{note.fileName}</h1><p className="reader-file-path" title={note.filePath}>{note.filePath}</p></div><div className="reader-actions"><button className="secondary" disabled={busy} onClick={onOpen}>添加 Markdown</button><button className="secondary" disabled={busy} onClick={onRefresh}>刷新文件</button><button className="secondary" disabled={busy} onClick={onExternal}>外部打开</button></div></header>
       <div className="reader-view-switch" aria-label="笔记观看模式"><button aria-label={navHidden ? '展开导航' : '收起导航'} aria-expanded={!navHidden} aria-controls="reader-navigation" onClick={() => setNavHidden(old => !old)}>{navHidden ? '☷' : '⇤'}</button><button aria-pressed={mode === 'markdown'} onClick={() => chooseMode('markdown')}>Markdown</button><button aria-pressed={mode === 'mindmap'} onClick={() => chooseMode('mindmap')}>Mindmap</button><button aria-pressed={mode === 'split'} onClick={() => chooseMode('split')}>对照</button><span>{mode === 'split' ? '拖动中线调整比例 · 点击节点定位原文' : mode === 'mindmap' ? '按章节展开 · 文字直接阅读' : '阅读原文 · 大纲可折叠定位'}</span></div>
       {notice && <div className={`notice ${notice.error ? 'error' : ''}`} role={notice.error ? 'alert' : 'status'}>{notice.text}</div>}
       {note.noteModified && <div className="reader-modified">此笔记已被外部修改，当前显示磁盘内容。</div>}
@@ -79,7 +79,7 @@ export function ReaderView({ document: note, navigation, busy, notice, onOpen, o
           onKeyDown={event => { const step = event.shiftKey ? .1 : .02; if (['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) { event.preventDefault(); setRatio(boundSplitRatio(event.key === 'Home' ? 0 : event.key === 'End' ? 1 : split + (event.key === 'ArrowLeft' ? -step : step), paneWidth)); } }}><span /></div>
         <div className="mindmap-holder" hidden={mode === 'markdown'}><MindmapView key={`${note.readerId}:${note.checksum}`} document={note} visible={mode !== 'markdown'} selectedId={active} focus={mapFocus} onSelect={selectNode} onJump={viewOriginal} /></div>
       </div>
-      <footer className="reader-footer"><span>{note.encoding.toUpperCase()} · {note.archive ? '保留来源追溯' : '直接阅读，不执行分析'}</span><span>外部修改后点击刷新 · 图片不自动加载</span></footer>
+      <footer className="reader-footer"><span>{note.encoding.toUpperCase()} · 本地阅读</span><span>外部修改后点击刷新 · 图片不自动加载</span></footer>
     </main>
   </div>;
 }

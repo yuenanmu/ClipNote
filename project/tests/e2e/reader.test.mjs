@@ -80,9 +80,8 @@ test('offline Markdown reader shares anchors, refreshes safely and traces archiv
     writeFileSync(saved.notePath, '# 已编辑的归档\n\n[实际依据](clipnote-source:' + segmentId + ')'); unlinkSync(input);
     await page.getByRole('button', { name: /^阅读笔记 来源.srt/ }).click(); await page.getByRole('button', { name: 'Markdown', exact: true }).click(); await page.getByRole('button', { name: '定位标题 已编辑的归档', exact: true }).waitFor();
     await page.getByText('此笔记已被外部修改，当前显示磁盘内容。', { exact: true }).waitFor();
-    await page.getByRole('button', { name: '实际依据', exact: true }).click();
-    await page.getByTestId('raw-source').locator('mark').getByText('第二条依据', { exact: true }).waitFor();
-    assert.match(await page.getByTestId('source-location').innerText(), /00:03\.000/);
+    assert.equal(await page.getByRole('button', { name: '实际依据', exact: true }).isDisabled(), true);
+    assert.equal(await page.getByRole('button', { name: '查看来源', exact: true }).count(), 0);
   });
   assert.deepEqual(errors, []); assert.deepEqual(requests, []);
 });

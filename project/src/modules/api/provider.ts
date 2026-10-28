@@ -8,40 +8,72 @@ import { analyzeSource } from '../analysis/run.ts';
 import { AnalysisError } from '../analysis/errors.ts';
 export async function analyzeWithApi(source: SourceDocument, credentials: ApiConfigInput, options: AnalysisOptions = {}): Promise<AnalysisResult> {
   const inputCharBudget = Math.max(1000, Math.min(16000, Math.floor((credentials.contextWindow - credentials.maxTokens - 512) / 3)));
-  const profile = { provider: `api:${createHash('sha256').update(credentials.baseUrl).digest('hex')}`, model: credentials.model, promptVersion: 't06-v1', inputCharBudget, outputCharBudget: 64000, overlapChars: 0, inputByteBudget: Math.min(512000, credentials.contextWindow - credentials.maxTokens - 612) };
-  const adapter = createApiAdapter(credentials); let failure: ApiError | undefined;
-  try { return await analyzeSource(source, profile, async request => { try { return await adapter(request); } catch (error) { if (error instanceof ApiError) failure = error; throw error; } }, options); }
+  const profile = { provider: `api:${createHash('sha256').update(credentials.baseUrl).digest('hex')}`, model: credentials.model, promptVersion: 't09-v2', inputCharBudget, outputCharBudget: 64000, overlapChars: 0, inputByteBudget: Math.min(512000, credentials.contextWindow - credentials.maxTokens - 612), ...(options.instructions ? { instructions: options.instructions } : {}) };
+  const adapter = createApiAdapter(credentials); let failure: ApiError | undefined; const started = performance.now(); let prepareMs = 0, apiMs = 0, requests = 0;
+  try { return await analyzeSource(source, profile, async request => { const begin = performance.now(); requests++; try { return await adapter(request); } catch (error) { if (error instanceof ApiError) failure = error; throw error; } finally { apiMs += performance.now() - begin; } }, { ...options, splitTruncated: true, onPrepared: ms => { prepareMs = ms; options.onPrepared?.(ms); } }); }
   catch (error) { if (failure && error instanceof AnalysisError && error.code === 'SERVICE_FAILED') { Object.assign(failure, { checkpoints: error.checkpoints }); throw failure; } throw error; }
+  finally { options.onMetrics?.({ prepareMs, apiMs, localMs: Math.max(0, performance.now() - started - prepareMs - apiMs), requests }); }
 }
-export function createApiAdapter(credentials: ApiConfigInput): AnalysisAdapter {
+function compactReferences(request: string): { prompt: string; ids: Map<string, string> } {
+  const ids = new Map<string, string>(), aliases = new Map<string, string>();
+  try {
+    const newline = request.indexOf('\n'); if (newline < 0) return { prompt: request, ids };
+    const payload = JSON.parse(request.slice(newline + 1));
+    if (!Array.isArray(payload.core) || !Array.isArray(payload.context)) return { prompt: request, ids };
+    for (const ref of [...payload.core, ...payload.context]) {
+      if (!ref || typeof ref.segmentId !== 'string') return { prompt: request, ids: new Map() };
+      let alias = aliases.get(ref.segmentId);
+      if (!alias) { alias = `s${aliases.size + 1}`; aliases.set(ref.segmentId, alias); ids.set(alias, ref.segmentId); }
+      ref.segmentId = alias;
+    }
+    return { prompt: request.slice(0, newline) + ' segmentId 是本次请求中的短标识，引用时必须原样返回。\n' + JSON.stringify(payload), ids };
+  } catch { return { prompt: request, ids: new Map() }; }
+}
+function restoreReferences(text: string, ids: Map<string, string>): unknown {
+  if (!ids.size) return text;
+  try {
+    const value: unknown = JSON.parse(text); const stack: unknown[] = [value]; let visited = 0;
+    while (stack.length) {
+      const item = stack.pop(); if (!item || typeof item !== 'object') continue;
+      if (++visited > 100000) return text;
+      if (Array.isArray(item)) { stack.push(...item); continue; }
+      const object = item as Record<string, unknown>;
+      if (typeof object.segmentId === 'string' && ids.has(object.segmentId)) object.segmentId = ids.get(object.segmentId)!;
+      for (const child of Object.values(object)) if (child && typeof child === 'object') stack.push(child);
+    }
+    return value;
+  } catch { return text; }
+}
+export function createApiAdapter(credentials: ApiConfigInput, timeoutMs = 60000): AnalysisAdapter {
   const config = { ...credentials };
   const model = { id: config.model, name: config.model, api: 'openai-completions' as const, provider: 'clipnote-api', baseUrl: config.baseUrl, reasoning: false, input: ['text' as const], cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }, contextWindow: config.contextWindow, maxTokens: config.maxTokens };
   return async request => {
     if (request.signal?.aborted) throw new ApiError('CANCELLED');
-    const prompt = request.chunk.request + (request.repair ? '\n上次结果格式错误。请仅输出符合要求的完整 JSON，不要添加代码围栏。' : '\n请仅输出完整 JSON，不要添加代码围栏。');
+    const compact = compactReferences(request.chunk.request);
+    const prompt = compact.prompt + (request.repair ? '\n上次结果格式错误。请仅输出符合要求的完整 JSON，不要添加代码围栏。' : '\n请仅输出完整 JSON，不要添加代码围栏。');
     if (Buffer.byteLength(prompt, 'utf8') > config.contextWindow - config.maxTokens - 512) throw new ApiError('INVALID_CONFIG');
-    let status: number | undefined;
+    let status: number | undefined, streamFailed = false; const timeout = AbortSignal.timeout(timeoutMs);
     try {
       const { createModels, createProvider } = await import('@earendil-works/pi-ai');
       const { openAICompletionsApi } = await import('@earendil-works/pi-ai/api/openai-completions.lazy');
       const models = createModels();
       models.setProvider(createProvider({ id: 'clipnote-api', name: 'ClipNote API', baseUrl: config.baseUrl, auth: { apiKey: { name: 'Configured API', resolve: async () => ({ auth: { apiKey: config.apiKey } }) } }, models: [model], api: openAICompletionsApi() }));
-      const timeout = AbortSignal.timeout(60000);
       const response = await models.completeSimple(models.getModel('clipnote-api', config.model)!, { messages: [{ role: 'user', content: prompt, timestamp: Date.now() }] }, { maxTokens: config.maxTokens, maxRetries: 0, signal: request.signal ? AbortSignal.any([request.signal, timeout]) : timeout, fetch: async (input, init) => {
         const result = await fetch(input, { ...init, redirect: 'error' }); status = result.status;
         if (!result.body) return result;
         const reader = result.body.getReader(); let size = 0; const limit = Math.min(4 * 1024 * 1024, Math.max(1024 * 1024, request.profile.outputCharBudget * 64));
-        const bounded = new ReadableStream<Uint8Array>({ async pull(controller) { try { const part = await reader.read(); if (part.done) { controller.close(); return; } size += part.value.byteLength; if (size > limit) { await reader.cancel(); controller.error(new Error('response limit exceeded')); return; } controller.enqueue(part.value); } catch (error) { controller.error(error); } }, cancel() { return reader.cancel(); } });
+        const bounded = new ReadableStream<Uint8Array>({ async pull(controller) { try { const part = await reader.read(); if (part.done) { controller.close(); return; } size += part.value.byteLength; if (size > limit) { await reader.cancel(); controller.error(new Error('response limit exceeded')); return; } controller.enqueue(part.value); } catch (error) { streamFailed = true; controller.error(error); } }, cancel() { return reader.cancel(); } });
         return new Response(bounded, { status: result.status, statusText: result.statusText, headers: result.headers });
       } });
       if (request.signal?.aborted) throw new ApiError('CANCELLED');
-      if (timeout.aborted) throw new ApiError('NETWORK');
-      if (status === 400 || status === 404 || status === 422) throw new ApiError('INVALID_CONFIG'); if (status === 401) throw new ApiError('AUTH_FAILED'); if (status === 402) throw new ApiError('BALANCE'); if (status === 403) throw new ApiError('PERMISSION_DENIED'); if (status === 429) throw new ApiError('RATE_LIMIT'); if (status && status >= 400) throw new ApiError('NETWORK');
+      if (timeout.aborted) throw new ApiError('TIMEOUT');
+      if (streamFailed && response.stopReason !== 'stop' && response.stopReason !== 'length') throw new ApiError('NETWORK');
+      if (status === 400 || status === 404 || status === 422) throw new ApiError('INVALID_CONFIG'); if (status === 401) throw new ApiError('AUTH_FAILED'); if (status === 402) throw new ApiError('BALANCE'); if (status === 403) throw new ApiError('PERMISSION_DENIED'); if (status === 408) throw new ApiError('TIMEOUT'); if (status === 429) throw new ApiError('RATE_LIMIT'); if (status && status >= 500) throw new ApiError('SERVER_ERROR'); if (status && status >= 400) throw new ApiError('NETWORK');
       if (response.stopReason === 'length') return { status: 'truncated', value: null };
       if (response.stopReason !== 'stop') throw new ApiError(status && status >= 200 && status < 300 ? 'INVALID_RESPONSE' : 'NETWORK');
       const text = response.content.filter(part => part.type === 'text').map(part => part.text).join('').trim();
       if (!text || text.length > request.profile.outputCharBudget) throw new ApiError('INVALID_RESPONSE');
-      return { status: 'completed', value: text };
-    } catch (error) { throw error instanceof ApiError ? error : new ApiError(request.signal?.aborted ? 'CANCELLED' : 'NETWORK'); }
+      return { status: 'completed', value: restoreReferences(text, compact.ids) };
+    } catch (error) { throw error instanceof ApiError ? error : new ApiError(request.signal?.aborted ? 'CANCELLED' : timeout.aborted ? 'TIMEOUT' : 'NETWORK'); }
   };
 }

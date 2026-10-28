@@ -19,12 +19,47 @@ test('pi-ai sends one configured request and the result passes actual T06 valida
   const result = await analyzeSource(source, profile, createApiAdapter(credentials(base)));
   assert.equal(count, 1); assert.equal(received.url, '/v1/chat/completions'); assert.equal(received.auth, `Bearer ${secret}`); assert.equal(received.body.model, profile.model); assert.ok(JSON.stringify(received.body).includes('合成原文')); assert.ok(result.markdown.includes('要点')); assert.ok(!JSON.stringify(result).includes(secret));
 });
+test('short reference identifiers reduce repeated model output while preserving real source links', async t => {
+  const tiny = parseSource(Buffer.from('第一段内容。\n\n第二段内容。'), '合成.txt'); let requestCore: any[] = []; let outputLength = 0, oldLength = 0;
+  const base = await server(t, async (req, res) => {
+    const parts = []; for await (const part of req) parts.push(part); const body = JSON.parse(Buffer.concat(parts).toString());
+    requestCore = JSON.parse(body.messages.at(-1).content.split('\n')[1]).core;
+    const refs = requestCore.map(({ segmentId, startOffset, endOffset }) => ({ segmentId, startOffset, endOffset }));
+    const makeOutput = (items: typeof refs) => JSON.stringify({ title: '笔记', sections: [{ heading: '章节', refs: items, items: [{ kind: 'point', text: '要点', refs: items, children: [] }] }] });
+    const output = makeOutput(refs); outputLength = output.length; oldLength = makeOutput(refs.map((ref, i) => ({ ...ref, segmentId: tiny.segments[i].segmentId }))).length; send(res, output);
+  });
+  const value = await analyzeWithApi(tiny, credentials(base));
+  assert.deepEqual(requestCore.map(ref => ref.segmentId), ['s1', 's2']);
+  assert.ok(oldLength - outputLength >= 250); assert.deepEqual(value.sourceRefs, tiny.segments.map(item => item.segmentId));
+  assert.deepEqual(value.outline.sections[0].refs.map(ref => ref.segmentId), tiny.segments.map(item => item.segmentId));
+  assert.ok(!value.markdown.includes('clipnote-source:'));
+});
+test('unknown compact identifiers still fail reference validation', async t => {
+  const base = await server(t, (_req, res) => { const refs = [{ segmentId: 's999', startOffset: 0, endOffset: 1 }]; send(res, JSON.stringify({ title: '笔记', sections: [{ heading: '章节', refs, items: [{ kind: 'point', text: '要点', refs, children: [] }] }] })); });
+  await assert.rejects(analyzeWithApi(source, credentials(base)), (error: any) => error.code === 'INVALID_REFERENCE');
+});
+test('analysis reports request count and time without exposing source or credentials', async t => {
+  const base = await server(t, (_req, res) => setTimeout(() => send(res, valid()), 40)); let metrics: any;
+  await analyzeWithApi(source, credentials(base), { onMetrics: value => { metrics = value; } });
+  assert.equal(metrics.requests, 1); assert.ok(metrics.apiMs >= 30); assert.ok(metrics.localMs >= 0); assert.ok(metrics.prepareMs >= 0);
+  assert.ok(!JSON.stringify(metrics).includes(secret)); assert.ok(!JSON.stringify(metrics).includes('合成原文'));
+});
 test('HTTP errors map to sanitized categories without retry or response body leakage', async t => {
-  for (const [status, expected] of [[400,'INVALID_CONFIG'], [404,'INVALID_CONFIG'], [401,'AUTH_FAILED'], [402,'BALANCE'], [403,'PERMISSION_DENIED'], [429,'RATE_LIMIT'], [500,'NETWORK']] as const) {
+  for (const [status, expected] of [[400,'INVALID_CONFIG'], [404,'INVALID_CONFIG'], [401,'AUTH_FAILED'], [402,'BALANCE'], [403,'PERMISSION_DENIED'], [408,'TIMEOUT'], [429,'RATE_LIMIT'], [500,'SERVER_ERROR'], [503,'SERVER_ERROR']] as const) {
     let count = 0; const base = await server(t, (_req,res) => { count++; res.writeHead(status, { 'Content-Type': 'application/json' }); res.end(JSON.stringify({ error: { message: secret } })); });
     const adapter = createApiAdapter(credentials(base)); const req = { chunk: { chunkId: 'test', index: 0, core: [], context: [], request: '合成' }, profile, repair: false };
     await assert.rejects(adapter(req), (error: any) => { assert.equal(error.code, expected); assert.ok(!String(error).includes(secret)); return true; }); assert.equal(count, 1);
   }
+});
+test('a request that exceeds its deadline is distinguished from a network failure', async t => {
+  const base = await server(t, (_req, _res) => {});
+  const req = { chunk: { chunkId: 'test', index: 0, core: [], context: [], request: '合成' }, profile, repair: false };
+  await assert.rejects(createApiAdapter(credentials(base), 30)(req), (error: any) => error.code === 'TIMEOUT' && !String(error).includes(secret));
+});
+test('a broken response stream is reported as a connection failure, not invalid model output', async t => {
+  const base = await server(t, (_req, res) => { res.writeHead(200, { 'Content-Type': 'text/event-stream' }); res.write('data: {"choices":[]}\n\n'); setTimeout(() => res.destroy(), 20); });
+  const req = { chunk: { chunkId: 'test', index: 0, core: [], context: [], request: '合成' }, profile, repair: false };
+  await assert.rejects(createApiAdapter(credentials(base))(req), (error: any) => error.code === 'NETWORK');
 });
 test('oversized streaming responses are stopped before unbounded text can accumulate', async t => {
   let closedEarly = false; let finished: () => void = () => {}; const closed = new Promise<void>(resolve => { finished = resolve; });
@@ -74,4 +109,25 @@ test('minimum supported context splits a long Chinese source into requests withi
 test('a valid response split over thousands of SSE frames remains accepted', async t => {
   const base = await server(t, (_req, res) => { res.writeHead(200, { 'Content-Type': 'text/event-stream' }); for (let i = 0; i < 4000; i++) res.write(`data: ${JSON.stringify({ id: 'fixture', object: 'chat.completion.chunk', model: profile.model, choices: [{ index: 0, delta: { content: 'a' }, finish_reason: null }] })}\n\n`); res.write(`data: ${JSON.stringify({ id: 'fixture', object: 'chat.completion.chunk', model: profile.model, choices: [{ index: 0, delta: {}, finish_reason: 'stop' }] })}\n\n`); res.end('data: [DONE]\n\n'); });
   const req = { chunk: { chunkId: 'test', index: 0, core: [], context: [], request: '合成' }, profile, repair: false }; const response = await createApiAdapter(credentials(base))(req); assert.equal(response.status, 'completed'); assert.equal((response.value as string).length, 4000);
+});
+test('a length-limited API response splits only that source range and retains every reference', async t => {
+  const long = parseSource(Buffer.from('原文😀'.repeat(250)), '合成.txt'); const requests: any[][] = [];
+  const base = await server(t, async (req, res) => {
+    const parts = []; for await (const part of req) parts.push(part);
+    const body = JSON.parse(Buffer.concat(parts).toString()); const input = JSON.parse(body.messages.at(-1).content.split('\n')[1]); requests.push(input.core);
+    const size = input.core.reduce((n: number, ref: any) => n + ref.text.length, 0);
+    if (size > 400) { send(res, '{', 'length'); return; }
+    const refs = input.core.map(({ segmentId, startOffset, endOffset }: any) => ({ segmentId, startOffset, endOffset }));
+    send(res, JSON.stringify({ title: '笔记', sections: [{ heading: '章节', refs, items: [{ kind: 'point', text: '要点', refs, children: [] }] }] }));
+  });
+  const value = await analyzeWithApi(long, credentials(base)); assert.ok(requests.length > 1);
+  const refs = value.outline.sections.flatMap(section => section.refs).sort((a, b) => a.startOffset - b.startOffset);
+  assert.equal(refs[0].startOffset, 0); assert.equal(refs.at(-1)?.endOffset, long.segments[0].text.length);
+  for (let i = 1; i < refs.length; i++) assert.equal(refs[i - 1].endOffset, refs[i].startOffset);
+  for (const request of requests) for (const ref of request) assert.doesNotMatch(ref.text, /[\uD800-\uDBFF]$|^[\uDC00-\uDFFF]/);
+});
+test('repeated length limits stop within a bounded number of calls and never publish partial output', async t => {
+  const long = parseSource(Buffer.from('原文'.repeat(400)), '合成.txt'); let calls = 0;
+  const base = await server(t, (_req, res) => { calls++; send(res, '{', 'length'); });
+  await assert.rejects(analyzeWithApi(long, credentials(base)), (error: any) => error.code === 'TRUNCATED'); assert.ok(calls <= 4);
 });

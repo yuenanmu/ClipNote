@@ -5,11 +5,16 @@ import type { StorageErrorCode } from '../modules/storage/errors.ts';
 import type { NoteEntry, ReaderDocument } from './reader.ts';
 import type { ReaderErrorCode } from '../modules/reader/errors.ts';
 import type { ApiConfigInput, ApiResult, ApiState } from './api.ts';
+import type { WorkflowResult } from './workflow.ts';
 export type ReaderResult<T> = { status: 'ok'; value: T } | { status: 'cancelled' } | { status: 'error'; error: { code: ReaderErrorCode; message: string } };
 export type ImportErrorCode = SourceErrorCode | 'IMPORT_BUSY' | 'FORBIDDEN_REQUEST' | 'IMPORT_FAILED';
 export type ImportResult = { status: 'imported'; document: SourceDocument } | { status: 'cancelled' } | { status: 'error'; error: { code: ImportErrorCode; message: string } };
 export type StorageResult<T> = { status: 'ok'; value: T } | { status: 'cancelled' } | { status: 'error'; error: { code: StorageErrorCode | 'FORBIDDEN_REQUEST' | 'STORAGE_BUSY'; message: string; draftId?: string } };
 export interface DesktopApi {
+  workflowState(): Promise<WorkflowResult>;
+  workflowStart(sourceId: string, expected: { baseUrl: string; model: string; instructions?: string }): Promise<WorkflowResult>;
+  workflowCancel(): Promise<WorkflowResult>;
+  workflowRetrySave(): Promise<WorkflowResult>;
   apiState(): Promise<ApiResult<ApiState>>;
   apiSave(input: ApiConfigInput): Promise<ApiResult<ApiState>>;
   apiTest(): Promise<ApiResult<null>>;

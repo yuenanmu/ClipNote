@@ -7,10 +7,12 @@ import { NotesWorkspace } from './features/reader/NotesWorkspace.tsx';
 import { ApiSettings } from './features/api/ApiSettings.tsx';
 import type { NoteEntry, ReaderDocument } from '../contracts/reader.ts';
 import type { ReaderResult } from '../contracts/desktop.ts';
+import type { WorkflowState } from '../contracts/workflow.ts';
 
 declare global { interface Window { clipnote: DesktopApi } }
 const PAGE_SIZE = 100;
 const RAW_PREVIEW_LIMIT = 200_000;
+const INSTRUCTIONS_KEY = 'clipnote.analysis.instructions';
 const paths = {
   file: 'M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z M14 2v6h6 M8 13h8 M8 17h5',
   plus: 'M12 5v14 M5 12h14',
@@ -42,6 +44,9 @@ export function App() {
   const [readerDocument, setReaderDocument] = useState<ReaderDocument>();
   const [showReader, setShowReader] = useState(false);
   const [showApi, setShowApi] = useState(false);
+  const [workflow, setWorkflow] = useState<WorkflowState>({ status: 'idle', completedChunks: 0 });
+  const [instructions, setInstructions] = useState(() => { try { return (window.localStorage.getItem(INSTRUCTIONS_KEY) ?? '').slice(0, 1000); } catch { return ''; } });
+  const [proposal, setProposal] = useState<{ sourceId: string; fileName: string; baseUrl: string; model: string }>();
   const [noteEntries, setNoteEntries] = useState<NoteEntry[]>([]);
   const document = documents.find(item => item.sourceId === activeId);
   const segment = document?.segments[selected];
@@ -52,7 +57,7 @@ export function App() {
   useEffect(() => { if (view === 'raw') rawMark.current?.scrollIntoView({ block: 'center' }); }, [view, selected, rawPage, activeId]);
   const openOriginal = () => { setRawPage(Math.floor((segment?.range.startOffset ?? 0) / RAW_PREVIEW_LIMIT)); setView('raw'); };
 
-  const selectDocument = (source: SourceDocument) => { setShowReader(false); setActiveId(source.sourceId); setSelected(0); setPage(0); setRawPage(0); setView('segments'); setNotice(undefined); setSavedVersion(undefined); };
+  const selectDocument = (source: SourceDocument) => { setShowReader(false); setActiveId(source.sourceId); setSelected(0); setPage(0); setRawPage(0); setView('segments'); setNotice(undefined); setSavedVersion(undefined); setProposal(undefined); };
   const addDocument = (source: SourceDocument) => { setDocuments(previous => [source, ...previous.filter(item => item.sourceId !== source.sourceId)].slice(0, 5)); selectDocument(source); };
   const refreshLibrary = async () => {
     const result = await window.clipnote.libraryState();
@@ -64,6 +69,14 @@ export function App() {
     if (result.status === 'ok') setNoteEntries(result.value);
     else if (result.status === 'error') setNotice({ text: result.error.message, error: true });
   };
+  useEffect(() => {
+    if (workflow.status !== 'running' && workflow.status !== 'saving') return;
+    let active = true; const timer = setInterval(() => { void window.clipnote.workflowState().then(async result => {
+      if (!active || result.status !== 'ok') return; setWorkflow(result.value);
+      if (!['running', 'saving'].includes(result.value.status)) { setBusy(false); if (result.value.status === 'succeeded') { try { await refreshLibrary(); } catch { setNotice({ text: '笔记已保存，但版本列表刷新失败。', error: true }); } } }
+    }).catch(() => { if (active) { setBusy(false); setNotice({ text: '无法读取分析状态，请重试。', error: true }); } }); }, 400);
+    return () => { active = false; clearInterval(timer); };
+  }, [workflow.status]);
   useEffect(() => {
     let active = true;
     window.clipnote.libraryState().then(result => {
@@ -85,6 +98,24 @@ export function App() {
     const result = await window.clipnote.chooseLibrary();
     if (result.status === 'ok') { setLibrary(result.value); return true; }
     setNotice(result.status === 'cancelled' ? { text: '已取消目录选择' } : { text: result.error.message, error: true }); return false;
+  };
+  const prepareAnalysis = async () => {
+    if (busy || !document) return; setBusy(true); setNotice(undefined);
+    try { if (!library.directory && !await chooseDirectory()) return; const config = await window.clipnote.apiState();
+      if (config.status === 'error') { setNotice({ text: config.error.message, error: true }); return; }
+      if (!config.value.configured) { setNotice({ text: '请先在 API 设置中配置服务和模型。', error: true }); return; }
+      setProposal({ sourceId: document.sourceId, fileName: document.fileName, baseUrl: config.value.baseUrl, model: config.value.model });
+    } catch { setNotice({ text: '无法准备分析，请重试。', error: true }); } finally { setBusy(false); }
+  };
+  const startAnalysis = async () => {
+    if (busy || !proposal) return; setBusy(true); setNotice(undefined);
+    try { const response = await window.clipnote.workflowStart(proposal.sourceId, { baseUrl: proposal.baseUrl, model: proposal.model, instructions });
+      if (response.status === 'error') { setNotice({ text: response.error.message, error: true }); setBusy(false); return; }
+      setProposal(undefined); setWorkflow(response.value); if (!['running','saving'].includes(response.value.status)) setBusy(false);
+    } catch { setBusy(false); setNotice({ text: '无法启动分析，请重试。', error: true }); }
+  };
+  const retryAnalysisSave = async () => {
+    if (busy) return; setBusy(true); try { const response = await window.clipnote.workflowRetrySave(); if (response.status === 'ok') { setWorkflow(response.value); if (!['running','saving'].includes(response.value.status)) setBusy(false); } else { setNotice({ text: response.error.message, error: true }); setBusy(false); } } catch { setBusy(false); setNotice({ text: '无法重试保存。', error: true }); }
   };
   const saveSource = async () => {
     if (!document) return;
@@ -143,22 +174,9 @@ export function App() {
     const result = url ? await window.clipnote.readerLink(readerDocument.readerId, url) : await window.clipnote.readerExternal(readerDocument.readerId);
     if (result.status === 'error') setNotice({ text: result.error.message, error: true });
   });
-  const readerSource = (segmentId?: string) => void readerAction(async () => {
-    if (!readerDocument?.archive) return;
-    const { sourceId, revisionId } = readerDocument.archive;
-    const result = await window.clipnote.openRevision(sourceId, revisionId);
-    if (result.status === 'error') { setNotice({ text: result.error.message, error: true }); return; }
-    if (result.status !== 'ok') return;
-    const source = result.value.document, index = segmentId ? source.segments.findIndex(item => item.segmentId === segmentId) : 0;
-    if (index < 0) { setNotice({ text: '来源引用不存在，已保留当前阅读。', error: true }); return; }
-    addDocument(source); setSavedVersion(result.value.revision);
-    setSelected(index); setPage(Math.floor(index / PAGE_SIZE));
-    if (segmentId) { setRawPage(Math.floor(source.segments[index].range.startOffset / RAW_PREVIEW_LIMIT)); setView('raw'); }
-    setNotice({ text: '已定位归档来源，可核对原文与实际位置。' });
-  });
 
   if (showApi) return <ApiSettings onBack={() => setShowApi(false)} />;
-  if (showReader) return <NotesWorkspace document={readerDocument} entries={noteEntries} revisions={library.revisions} busy={busy} notice={notice} onAdd={openMarkdown} onOpen={noteOpen} onRemove={noteRemove} onRelink={noteRelink} onListRefresh={() => void readerAction(async () => { await refreshNotes(); await refreshLibrary(); })} onRevision={readVersion} onBack={() => { setShowReader(false); setNotice(undefined); }} onRefresh={() => void readerAction(async () => { if (readerDocument) acceptReader(await window.clipnote.readerRefresh(readerDocument.readerId)); await refreshNotes(); })} onExternal={() => readerExternal()} onExternalLink={readerExternal} onSource={readerSource} />;
+  if (showReader) return <NotesWorkspace document={readerDocument} entries={noteEntries} revisions={library.revisions} busy={busy} notice={notice} onAdd={openMarkdown} onOpen={noteOpen} onRemove={noteRemove} onRelink={noteRelink} onListRefresh={() => void readerAction(async () => { await refreshNotes(); await refreshLibrary(); })} onRevision={readVersion} onBack={() => { setShowReader(false); setNotice(undefined); }} onRefresh={() => void readerAction(async () => { if (readerDocument) acceptReader(await window.clipnote.readerRefresh(readerDocument.readerId)); await refreshNotes(); })} onExternal={() => readerExternal()} onExternalLink={readerExternal} />;
 
   return <div className="app-shell">
     <aside className="sidebar">
@@ -179,11 +197,14 @@ export function App() {
     </aside>
     <main className="desktop" aria-busy={busy}>
       <header className="toolbar"><div><p className="eyebrow">工作台 / 文件导入</p><h1 title={document?.fileName}>{document?.fileName ?? '文件导入'}</h1><p className="toolbar-caption">{document ? '保留来源，核对每一个片段。' : '把字幕与文本，带到同一个工作台。'}</p></div>
-        <div className="toolbar-actions">{document?.format === 'md' && <button className="secondary" disabled={busy} onClick={noteFromSource}>加入笔记区</button>}<button className="secondary" disabled={busy || !document} onClick={() => void storageAction(saveSource)}>保存来源</button><button className="primary" disabled={busy} onClick={() => void importFile()}><Icon name="plus" size={16} />{busy ? '正在处理…' : '导入文件'}</button></div>
+        <div className="toolbar-actions">{document?.format === 'md' && <button className="secondary" disabled={busy} onClick={noteFromSource}>加入笔记区</button>}<button className="secondary" disabled={busy || !document} onClick={() => void storageAction(saveSource)}>保存来源</button><button className="secondary" disabled={busy || !document} onClick={() => void prepareAnalysis()}>AI 整理</button><button className="primary" disabled={busy} onClick={() => void importFile()}><Icon name="plus" size={16} />{busy ? '正在处理…' : '导入文件'}</button></div>
       </header>
       <div className="library-bar"><span title={library.directory ?? ''}>{library.directory ? `保存目录：${library.directory}` : '选择本地目录，归档后可在重启时重新打开。'}</span><button disabled={busy} onClick={() => void storageAction(async () => { await chooseDirectory(); })}>{library.directory ? '更改目录' : '选择保存目录'}</button></div>
       {notice && <div className={`notice ${notice.error ? 'error' : ''}`} role={notice.error ? 'alert' : 'status'}>{notice.text}</div>}
       {!!library.warnings.length && <div className="library-warning" role="status">{library.warnings[0]}</div>}
+      {proposal && <section className="analysis-confirm" aria-label="确认发送资料"><strong>确认发送资料</strong><p>将「{proposal.fileName}」的内容发送至 {proposal.baseUrl}，使用模型 {proposal.model} 整理。内容可能分多次发送；遇到输出截断会拆小重试，增加请求次数和费用。</p><label>补充整理要求（选填）<textarea aria-label="补充整理要求" maxLength={1000} value={instructions} onChange={event => setInstructions(event.target.value)} placeholder="例如：重点整理操作步骤，保留示例" /></label><p>默认规则会保留来源引用；补充要求也会发送给所选服务。</p><div><button className="secondary" disabled={busy} onClick={() => { try { window.localStorage.setItem(INSTRUCTIONS_KEY, instructions); setNotice({ text: '补充要求已保存到本机。' }); } catch { setNotice({ text: '无法保存补充要求。', error: true }); } }}>保存补充要求</button><button className="secondary" disabled={busy} onClick={() => { try { window.localStorage.removeItem(INSTRUCTIONS_KEY); setInstructions(''); setNotice({ text: '已恢复默认整理要求。' }); } catch { setNotice({ text: '无法恢复默认要求。', error: true }); } }}>恢复默认</button><button className="primary" disabled={busy} onClick={() => void startAnalysis()}>确认发送并整理</button><button className="secondary" disabled={busy} onClick={() => setProposal(undefined)}>取消</button></div></section>}
+      {workflow.status !== 'idle' && <section className="analysis-status" role="status"><strong>{workflow.status === 'running' ? `正在整理 · 已完成 ${workflow.completedChunks} 个分块` : workflow.status === 'saving' ? '正在保存笔记…' : workflow.status === 'succeeded' ? '笔记整理并保存完成' : workflow.status === 'cancelled' ? '已取消整理，来源仍保留。' : '整理或保存未完成'}</strong>{workflow.error && <p>{workflow.error.message}</p>}{workflow.status === 'running' && <button className="secondary" onClick={() => void window.clipnote.workflowCancel()}>取消整理</button>}{workflow.canRetrySave && <button className="secondary" disabled={busy} onClick={() => void retryAnalysisSave()}>重试保存</button>}{workflow.status === 'succeeded' && workflow.revision && <button className="secondary" disabled={busy} onClick={() => readVersion(workflow.revision!)}>阅读生成笔记</button>}</section>}
+      {workflow.timing && !['running', 'saving'].includes(workflow.status) && <p className="preview-note" role="status">本次耗时：准备 {(workflow.timing.prepareMs / 1000).toFixed(1)} 秒 · API 请求与响应 {(workflow.timing.apiMs / 1000).toFixed(1)} 秒（{workflow.timing.requests} 次） · 本地校验与生成 {(workflow.timing.localMs / 1000).toFixed(1)} 秒 · 保存 {(workflow.timing.saveMs / 1000).toFixed(1)} 秒</p>}
       <div className="content-layout">
         <section className="workspace" aria-label="来源工作区">
           {!document ? <div className="welcome">

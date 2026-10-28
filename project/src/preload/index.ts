@@ -1,6 +1,10 @@
 import { contextBridge, ipcRenderer } from 'electron';
 import type { DesktopApi } from '../contracts/desktop.ts';
 const api: DesktopApi = {
+  workflowState: (...args: unknown[]) => ipcRenderer.invoke('workflow:state', ...args),
+  workflowStart: (...args: unknown[]) => ipcRenderer.invoke('workflow:start', ...args),
+  workflowCancel: (...args: unknown[]) => ipcRenderer.invoke('workflow:cancel', ...args),
+  workflowRetrySave: (...args: unknown[]) => ipcRenderer.invoke('workflow:retry', ...args),
   apiState: (...args: unknown[]) => ipcRenderer.invoke('api:state', ...args),
   apiSave: (...args: unknown[]) => ipcRenderer.invoke('api:save', ...args),
   apiTest: (...args: unknown[]) => ipcRenderer.invoke('api:test', ...args),

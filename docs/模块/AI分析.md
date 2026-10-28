@@ -26,12 +26,12 @@ T06 输出适配通用 Mindmap：标题表示章节，嵌套列表表达论点/�
 ## 当前纯核心接口
 
 - `planAnalysis(source, profile): ChunkPlan`：来源片段边界优先，超长单段按片段内 UTF-16 半开范围拆分，不切开代理对。core 完整连续覆盖来源片段，context 为有限前文；请求仅包含片段数据，不包含本地原路径。计划哈希覆盖来源内容、范围、服务/模型/提示词及预算，输入变化使旧检查点失效。
-- `AnalysisProfile`：provider/model/promptVersion 与 inputCharBudget/outputCharBudget/overlapChars，以及可选 inputByteBudget；字符预算不是 token 预算。输入可配1,000～128,000字符，输出1,000～512,000字符，重叠不超过输入的四分之一。实际序列化请求必须同时满足字符与（如有）UTF-8字节预算。API适配器当前为避免字节预算与重叠竞争使用零重叠，仍完整覆盖来源；真实服务另需核对模型上下文和token限制。
+- `AnalysisProfile`：provider/model/promptVersion 与 inputCharBudget/outputCharBudget/overlapChars，以及可选 inputByteBudget 和用户补充要求；字符预算不是 token 预算。补充要求计入预算和计划哈希，固定的结构与引用规则继续生效。实际序列化请求必须同时满足字符与（如有）UTF-8字节预算。API适配器当前为避免字节预算与重叠竞争使用零重叠，仍完整覆盖来源；真实服务另需核对模型上下文和token限制。
 - `validateOutline(value, source, chunk?)`：只接受 title/sections，每章 heading/refs/items，实质条目 kind/text/refs/children；kind 为 summary/point/support/example/limitation。章节、父项和叶子均需来源引用；引用为 segmentId/startOffset/endOffset，不能越过片段或本次 core/context 实际提供的范围，不接受模型生成时间。
 - `analyzeSource(source, profile, adapter, options?)`：串行调用注入的异步适配器，返回 outline/markdown/sourceRefs/attempt/checkpoints。适配器显式返回 completed/truncated；仅 completed 的格式/结构问题允许最多一次 repair，引用、截断、服务失败不自动换服务。signal 传入调用，调用前后检查；取消后迟到的结果不发布。
 - 检查点包含 planId/chunkId/已校验 outline。失败携带已完成检查点，显式重试可传回；拒绝外来/重复/过期检查点并再次校验范围。回调收到副本。核心不落盘，T09/T11 再实现任务与持久恢复，不能把内存恢复宣称为跨重启恢复。
 - 合并只在章节标题、条目类型/文字及引用范围完全相同的情况下去重，同时并集独有子项；不同依据保留。首个块的笔记标题为最终标题，章节按块序保留。无额外全局模型重写，语义级章节归并留到真实质量验收后评估。
-- `renderMarkdown`：一级笔记标题、二级章节、嵌套条目列表；模型文字转义，URL/邮箱式词用行内代码保持字面内容以阻止GFM自动链接；来源链接使用既有 clipnote-source 协议，显示真实字幕时间或段落/字符范围。当前回跳定位来源片段，字符范围作为可见标签，不扩展 M06 到字符选区。生成末尾调用M06纯parseMarkdown核验实际大小/AST复杂度，超限转TOO_LARGE并保留检查点；不读取路径或发IPC。
+- `renderMarkdown`：一级笔记标题、二级章节、嵌套条目列表，正文不显示机械类型前缀，也不写入来源链接、段落或字符范围；模型文字转义，URL/邮箱式词用行内代码保持字面内容以阻止GFM自动链接。来源引用保留于分析结构中供内部校验，生成末尾调用M06纯parseMarkdown核验实际大小/AST复杂度，超限转TOO_LARGE并保留检查点。
 - 安全上限：1,000块，最终结构2,000节点、条目8层，每条最多64引用，总引用20,000，最终 Markdown 512 KiB；超限明确失败，不截断后称成功。结构校验只验证可追溯性和形状，不能证明每条总结被来源语义支持或无遗漏。
 
 ## 服务与鉴权
@@ -45,6 +45,8 @@ API 与订阅分别配置和验收，参数差异由适配层处理。失败暂�
 T07新增 `src/modules/api/`：`ApiConfigStore` 经系统加密保存密钥，`createApiAdapter` 用 pi-ai OpenAI Chat Completions发起单块请求，`analyzeWithApi` 注入 T06并将服务地址哈希纳入计划归属。禁用自动重试与重定向，固定错误类别；传输响应最多4 MiB并约束最终文本大小。输入按配置的上下文窗口、输出上限、协议余量和实际UTF-8请求大小作保守限制，但无法保证任意模型tokenizer完全一致。部分兼容服务不支持SDK默认请求参数，真实兼容性待验。当前T07有设置与显式合成连接测试，文件到笔记UI留T09；检查点仍仅内存保存。
 
 API设置新增主动模型发现：向用户指定地址发送认证GET /models，不发送来源文本，允许用户选择返回的模型ID或手动输入。只对同一已保存地址复用其已保存密钥，更换地址清空未保存输入；请求不跟随重定向。HTTP402与429分别提示余额及频率/网关限制，具体服务可能有自己的含义，不以429断言余额不足。
+
+API 请求内的长来源片段 ID 使用当前请求内的短别名；模型返回后在可信进程还原为真实 ID，再按原有规则校验引用范围。该优化减少模型重复生成的文本，不改变原文、原始 ID 或保存格式；单次请求耗时仍取决于所选服务与模型。
 
 ## 错误与验收重点
 
