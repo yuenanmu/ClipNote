@@ -6,14 +6,14 @@
 
 T15/T16 开发分支支持选择普通笔记根目录、浏览和管理真实目录、创建及编辑 Markdown，并检测外部修改冲突；保留旧归档阅读。范围和安全边界见[实施计划](../superpowers/plans/2026-10-28-file-management-batch.md)，未完成项见任务清单。
 
-独立笔记区管理已有 MD 的持久路径引用，并列出当前库的归档笔记。每份笔记可切换 Markdown、Mindmap、可调比例的对照视图；正文保留可折叠标题树、定位和主动刷新。Obsidian/外部编辑器为主动选择的可选入口。
+独立笔记区以真实目录树管理普通 Markdown，原持久登记与归档移到单独的旧内容入口。每份笔记可切换 Markdown、Mindmap、可调比例的对照视图；正文保留可折叠标题树、定位和主动刷新。Obsidian/外部编辑器为主动选择的可选入口。
 
-首版只读，不修改 Markdown、不拖动节点改写正文、不调用 AI，也不要求 SmartSub 或 Obsidian 已安装。
+普通笔记支持在主区域编辑并经 WorkspaceFiles 安全保存，保存时检查外部冲突，保留保存期间继续输入的未保存内容。旧归档保持只读；脑图不支持拖动节点改写正文。阅读不调用 AI，也不要求 SmartSub 或 Obsidian 已安装。
 
 ## 输入、输出与关系
 
 - 输入：受控文件选择得到的 Markdown 路径，或 SavedRevision 及来源映射。
-- 输出：同一 Markdown AST 驱动的标题树、正文锚点、脑图和本地原文定位。标题是主干，嵌套列表和普通段落按原文顺序形成子分支；代码/表格使用紧凑入口，frontmatter 不入图。
+- 输出：同一 Markdown AST 驱动的标题树、正文锚点、脑图和笔记正文定位。标题是主干，嵌套列表和普通段落按原文顺序形成子分支；代码/表格使用紧凑入口，frontmatter 不入图。
 - 文件访问/外部打开经 [M01](桌面壳与公共契约.md)；版本与原文由 [M05](本地存储与版本.md) 提供。直接阅读不经过 M07 的分析链。
 - 实际位置：`project/src/modules/reader/` 负责有界读取、mdast 和链接分类；`project/src/main/reader-controller.ts`/`reader-worker.ts` 维护会话和 Worker；`project/src/renderer/features/reader/` 负责标题树与白名单正文渲染。类型位于 `project/src/contracts/reader.ts`。
 
@@ -25,6 +25,7 @@ T15/T16 开发分支支持选择普通笔记根目录、浏览和管理真实目
 - `loadReader(target,stateDir):Promise<LoadedReader>` 仅供可信 Worker 使用。file 目标来自系统选择框；revision 目标通过 M05 校验已提交版本，读取当前 note.md 和来源片段标识。归档刷新必须仍匹配此前已登记的笔记路径，避免更换库后静默换成另一个文件。
 - `window.clipnote.readerOpen()`、`readerRevision(sourceId,revisionId)` 返回 ReaderDocument；`readerRefresh(readerId)` 重读；`readerExternal(readerId)` 交系统默认应用；`readerLink(readerId,url)` 只允许会话已登记的 HTTP(S)。结果为 ok/value、cancelled 或固定 error，页面不传任意路径。
 - 会话最多5份、主进程串行操作；失效 ID 要求重新打开。打开/刷新失败保留旧会话和正文。阅读区不提供跳回导入原文的入口。
+- 普通目录树通过 `readerWorkspace(fileId)` 打开受控 Markdown，包括空白笔记；编辑与保存通过 workspace 桥接执行，不要求先导入为非空分析来源。旧登记接口仅用于单独的旧内容入口。
 
 持久笔记列表独立于最多5份临时阅读会话；从列表再次打开会重新加载并建立会话。添加/重新关联先完整验证读取成功再更新登记，取消或失败保留旧登记/正文；登记文件只保存路径引用，不保存用户正文。
 
@@ -54,7 +55,7 @@ ReaderView 的模式为 markdown/mindmap/split；同一份 Markdown 和 Markmap 
 
 原始文件及解码后的 UTF-8 内容上限2 MiB、AST 最多20,000节点/64层嵌套；读取与解析在 Worker 内，超限明确失败。正文每页100个根块，目录保留全量有效标题并能切换至目标页。标题树折叠只影响目录，首版不改变正文或源文件。
 
-外部修改后用户刷新或重开加载新磁盘内容，不要求常驻监听。旧生成笔记的已知来源标记仅在应用显示中隐藏，不修改原文件；普通 Markdown 保持原文。
+普通笔记的目录变化触发刷新；搜索打开的深层文件也监听其安全父目录，编辑中发现外部修改则提示冲突。内容不变时保留原阅读模型和脑图状态；仍可主动刷新或重开。旧生成笔记的已知来源标记仅在应用显示中隐藏，不修改原文件；普通 Markdown 保持原文。
 
 阅读界面不打开来源链接；未知片段和任意相对/绝对路径禁用。读取版本仍显示外部编辑标记；损坏或缺失明确报错。
 
@@ -70,6 +71,6 @@ Obsidian 仅在用户主动点击时尝试打开；文件不在已知库时显�
 
 ## 关联任务与分支
 
-T05 `feat/reader`；T09 连接生成后阅读。授权、交互验证、复选框和完成情况见[任务清单](../任务清单.md#t05--本地-markdown-阅读器)。
+T05 `feat/reader`；T09 连接生成后阅读；T15/T16 在 `feat/file-management` 实现真实目录和主区域编辑。授权、交互验证、复选框和完成情况见[任务清单](../任务清单.md)。
 
 解析行为依据：[remark-parse 官方说明](https://github.com/remarkjs/remark/tree/main/packages/remark-parse)、[remark-frontmatter 官方说明](https://github.com/remarkjs/remark-frontmatter)。渲染接口见 [Markmap API](https://markmap.js.org/api/classes/markmap-view.Markmap.html) 和 [IPureNode](https://markmap.js.org/api/interfaces/markmap-common.IPureNode.html)。实际行为以固定依赖和本项目测试为准。
