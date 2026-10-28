@@ -5,9 +5,9 @@ import type { MindmapNode, ReaderDocument, ReaderPosition } from '../../../contr
 import { markmapData } from './markmap-data.ts';
 
 const colors = ['#e8a05c', '#79b9dd', '#a797dc', '#76bea5', '#d88ca1', '#c9bc6b'];
-export function MindmapView({ document: note, visible, selectedId, focus, onSelect, onJump }: {
+export function MindmapView({ document: note, visible, selectedId, focus, onSelect, onJump, onSourceReference }: {
   document: ReaderDocument; visible: boolean; selectedId?: string; focus?: ReaderPosition;
-  onSelect(node: MindmapNode): void; onJump(position: ReaderPosition): void;
+  onSelect(node: MindmapNode): void; onJump(position: ReaderPosition): void; onSourceReference(url: string): void;
 }) {
   const model = useMemo(() => markmapData(note.content.mindmap, note.fileName), [note.content.mindmap, note.fileName]);
   const holder = useRef<HTMLDivElement>(null), canvas = useRef<HTMLDivElement>(null), engine = useRef<Markmap | undefined>(undefined);
@@ -95,7 +95,7 @@ export function MindmapView({ document: note, visible, selectedId, focus, onSele
   const restore = () => run(async map => { const k = map.svg.property('__zoom').k; await map.rescale(1 / k); await map.ensureVisible((selectedId && index.current.get(selectedId)) || map.state.data!, { left: 24, right: 24, top: 90, bottom: 40 }); });
   const fold = (all: boolean) => run(async map => { for (const node of index.current.values()) node.payload = { ...node.payload, fold: !all && node.state.depth >= 2 ? 1 : 0 }; await map.renderData(); });
   return <div className="mindmap-stage" ref={holder}>
-    <div className="mindmap-controls"><button disabled={!ready} onClick={() => run(map => map.rescale(1.25))} aria-label="放大脑图">＋</button><span>{scale < .01 ? (scale * 100).toPrecision(2) : Math.round(scale * 100)}%</span><button disabled={!ready} onClick={() => run(map => map.rescale(.8))} aria-label="缩小脑图">−</button><button disabled={!ready} onClick={restore}>恢复可读比例</button><button disabled={!ready} onClick={() => run(map => map.fit(1))}>查看全图</button><button disabled={!ready} onClick={() => fold(false)}>章节主干</button><button disabled={!ready} onClick={() => fold(true)}>展开全部</button><button disabled={!ready || !selected} onClick={() => run(map => map.centerNode(index.current.get(selectedId!)!, { top: 90, bottom: 40 }))}>定位选中节点</button><button disabled={!selected?.target} onClick={() => { if (selected?.target) callbacks.current.onJump(selected.target); }}>查看原文</button></div>
+    <div className="mindmap-controls"><button disabled={!ready} onClick={() => run(map => map.rescale(1.25))} aria-label="放大脑图">＋</button><span>{scale < .01 ? (scale * 100).toPrecision(2) : Math.round(scale * 100)}%</span><button disabled={!ready} onClick={() => run(map => map.rescale(.8))} aria-label="缩小脑图">−</button><button disabled={!ready} onClick={restore}>恢复可读比例</button><button disabled={!ready} onClick={() => run(map => map.fit(1))}>查看全图</button><button disabled={!ready} onClick={() => fold(false)}>章节主干</button><button disabled={!ready} onClick={() => fold(true)}>展开全部</button><button disabled={!ready || !selected} onClick={() => run(map => map.centerNode(index.current.get(selectedId!)!, { top: 90, bottom: 40 }))}>定位选中节点</button><button disabled={!selected?.target} onClick={() => { if (selected?.target) callbacks.current.onJump(selected.target); }}>查看原文</button>{note.archive && selected?.sourceLinks?.map((url, index) => <button key={url} onClick={() => onSourceReference(url)}>回查来源 {index + 1}</button>)}</div>
     <div className="mindmap-canvas-wrap" ref={canvas} />
     {!ready && !error && <div className="map-loading" role="status">正在准备章节结构…</div>}
     {error && <div className="map-loading" role="alert">脑图暂时无法显示，可切换 Markdown 阅读或重新打开文件。</div>}

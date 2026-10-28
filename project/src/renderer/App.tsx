@@ -12,6 +12,7 @@ import type { WorkflowState } from '../contracts/workflow.ts';
 declare global { interface Window { clipnote: DesktopApi } }
 const PAGE_SIZE = 100;
 const RAW_PREVIEW_LIMIT = 200_000;
+const INSTRUCTIONS_KEY = 'clipnote.analysis.instructions';
 const paths = {
   file: 'M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z M14 2v6h6 M8 13h8 M8 17h5',
   plus: 'M12 5v14 M5 12h14',
@@ -44,6 +45,7 @@ export function App() {
   const [showReader, setShowReader] = useState(false);
   const [showApi, setShowApi] = useState(false);
   const [workflow, setWorkflow] = useState<WorkflowState>({ status: 'idle', completedChunks: 0 });
+  const [instructions, setInstructions] = useState(() => { try { return (window.localStorage.getItem(INSTRUCTIONS_KEY) ?? '').slice(0, 1000); } catch { return ''; } });
   const [proposal, setProposal] = useState<{ sourceId: string; fileName: string; baseUrl: string; model: string }>();
   const [noteEntries, setNoteEntries] = useState<NoteEntry[]>([]);
   const document = documents.find(item => item.sourceId === activeId);
@@ -107,7 +109,7 @@ export function App() {
   };
   const startAnalysis = async () => {
     if (busy || !proposal) return; setBusy(true); setNotice(undefined);
-    try { const response = await window.clipnote.workflowStart(proposal.sourceId, { baseUrl: proposal.baseUrl, model: proposal.model });
+    try { const response = await window.clipnote.workflowStart(proposal.sourceId, { baseUrl: proposal.baseUrl, model: proposal.model, instructions });
       if (response.status === 'error') { setNotice({ text: response.error.message, error: true }); setBusy(false); return; }
       setProposal(undefined); setWorkflow(response.value); if (!['running','saving'].includes(response.value.status)) setBusy(false);
     } catch { setBusy(false); setNotice({ text: '无法启动分析，请重试。', error: true }); }
@@ -213,8 +215,9 @@ export function App() {
       <div className="library-bar"><span title={library.directory ?? ''}>{library.directory ? `保存目录：${library.directory}` : '选择本地目录，归档后可在重启时重新打开。'}</span><button disabled={busy} onClick={() => void storageAction(async () => { await chooseDirectory(); })}>{library.directory ? '更改目录' : '选择保存目录'}</button></div>
       {notice && <div className={`notice ${notice.error ? 'error' : ''}`} role={notice.error ? 'alert' : 'status'}>{notice.text}</div>}
       {!!library.warnings.length && <div className="library-warning" role="status">{library.warnings[0]}</div>}
-      {proposal && <section className="analysis-confirm" aria-label="确认发送资料"><strong>确认发送资料</strong><p>将「{proposal.fileName}」的内容发送至 {proposal.baseUrl}，使用模型 {proposal.model} 整理。内容可能分多次发送；遇到输出截断会拆小重试，增加请求次数和费用。</p><div><button className="primary" disabled={busy} onClick={() => void startAnalysis()}>确认发送并整理</button><button className="secondary" disabled={busy} onClick={() => setProposal(undefined)}>取消</button></div></section>}
+      {proposal && <section className="analysis-confirm" aria-label="确认发送资料"><strong>确认发送资料</strong><p>将「{proposal.fileName}」的内容发送至 {proposal.baseUrl}，使用模型 {proposal.model} 整理。内容可能分多次发送；遇到输出截断会拆小重试，增加请求次数和费用。</p><label>补充整理要求（选填）<textarea aria-label="补充整理要求" maxLength={1000} value={instructions} onChange={event => setInstructions(event.target.value)} placeholder="例如：重点整理操作步骤，保留示例" /></label><p>默认规则会保留来源引用；补充要求也会发送给所选服务。</p><div><button className="secondary" disabled={busy} onClick={() => { try { window.localStorage.setItem(INSTRUCTIONS_KEY, instructions); setNotice({ text: '补充要求已保存到本机。' }); } catch { setNotice({ text: '无法保存补充要求。', error: true }); } }}>保存补充要求</button><button className="secondary" disabled={busy} onClick={() => { try { window.localStorage.removeItem(INSTRUCTIONS_KEY); setInstructions(''); setNotice({ text: '已恢复默认整理要求。' }); } catch { setNotice({ text: '无法恢复默认要求。', error: true }); } }}>恢复默认</button><button className="primary" disabled={busy} onClick={() => void startAnalysis()}>确认发送并整理</button><button className="secondary" disabled={busy} onClick={() => setProposal(undefined)}>取消</button></div></section>}
       {workflow.status !== 'idle' && <section className="analysis-status" role="status"><strong>{workflow.status === 'running' ? `正在整理 · 已完成 ${workflow.completedChunks} 个分块` : workflow.status === 'saving' ? '正在保存笔记…' : workflow.status === 'succeeded' ? '笔记整理并保存完成' : workflow.status === 'cancelled' ? '已取消整理，来源仍保留。' : '整理或保存未完成'}</strong>{workflow.error && <p>{workflow.error.message}</p>}{workflow.status === 'running' && <button className="secondary" onClick={() => void window.clipnote.workflowCancel()}>取消整理</button>}{workflow.canRetrySave && <button className="secondary" disabled={busy} onClick={() => void retryAnalysisSave()}>重试保存</button>}{workflow.status === 'succeeded' && workflow.revision && <button className="secondary" disabled={busy} onClick={() => readVersion(workflow.revision!)}>阅读生成笔记</button>}</section>}
+      {workflow.timing && !['running', 'saving'].includes(workflow.status) && <p className="preview-note" role="status">本次耗时：准备 {(workflow.timing.prepareMs / 1000).toFixed(1)} 秒 · API 请求与响应 {(workflow.timing.apiMs / 1000).toFixed(1)} 秒（{workflow.timing.requests} 次） · 本地校验与生成 {(workflow.timing.localMs / 1000).toFixed(1)} 秒 · 保存 {(workflow.timing.saveMs / 1000).toFixed(1)} 秒</p>}
       <div className="content-layout">
         <section className="workspace" aria-label="来源工作区">
           {!document ? <div className="welcome">

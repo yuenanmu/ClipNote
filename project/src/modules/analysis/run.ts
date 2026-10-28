@@ -19,7 +19,7 @@ function mergeOutlines(outlines: NoteOutline[]): NoteOutline {
   return result;
 }
 export async function analyzeSource(source: SourceDocument, profile: AnalysisProfile, adapter: AnalysisAdapter, options: AnalysisOptions = {}): Promise<AnalysisResult> {
-  const plan = planAnalysis(source, profile); const snapshot = structuredClone(source); const completed = new Map<string, ChunkCheckpoint>();
+  const started = performance.now(); const plan = planAnalysis(source, profile); const snapshot = structuredClone(source); options.onPrepared?.(performance.now() - started); const completed = new Map<string, ChunkCheckpoint>();
   const checkpoints = () => plan.chunks.flatMap(c => completed.has(c.chunkId) ? [structuredClone(completed.get(c.chunkId)!)] : []);
   const cancelled = () => { if (options.signal?.aborted) throw new AnalysisError('CANCELLED'); };
   function output(value: unknown): unknown {
@@ -47,7 +47,7 @@ export async function analyzeSource(source: SourceDocument, profile: AnalysisPro
     if (!left.length || !right.length) return undefined;
     return [left, right].map((core, index) => {
       const data = core.map(ref => ({ ...ref, text: segments.get(ref.segmentId)!.text.slice(ref.startOffset, ref.endOffset) }));
-      const request = ANALYSIS_INSTRUCTION + '\n' + JSON.stringify({ sourceId: snapshot.sourceId, promptVersion: plan.profile.promptVersion, core: data, context: [] });
+      const request = ANALYSIS_INSTRUCTION + '\n' + JSON.stringify({ sourceId: snapshot.sourceId, promptVersion: plan.profile.promptVersion, ...(plan.profile.instructions ? { userInstructions: plan.profile.instructions } : {}), core: data, context: [] });
       return { chunkId: `${chunk.chunkId}.${index + 1}`, index: chunk.index, core, context: [], request };
     });
   }

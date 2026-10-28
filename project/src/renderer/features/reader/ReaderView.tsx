@@ -4,6 +4,7 @@ import type { MindmapNode, ReaderDocument, ReaderHeading, ReaderLink, ReaderPosi
 import { MarkdownBody } from './MarkdownBody.tsx';
 import { MindmapView } from './MindmapView.tsx';
 import { boundSplitRatio, readSplitRatio, SPLIT_PREFERENCE } from './split-preference.ts';
+import { classifyLink } from '../../../modules/reader/links.ts';
 import './reader.css';
 const PAGE_SIZE = 100;
 type ReadingMode = 'markdown' | 'mindmap' | 'split';
@@ -77,7 +78,7 @@ export function ReaderView({ document: note, navigation, busy, notice, onOpen, o
           onPointerUp={event => { dragging.current = false; if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId); }}
           onPointerCancel={() => { dragging.current = false; }} onDoubleClick={() => setRatio(.4)}
           onKeyDown={event => { const step = event.shiftKey ? .1 : .02; if (['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) { event.preventDefault(); setRatio(boundSplitRatio(event.key === 'Home' ? 0 : event.key === 'End' ? 1 : split + (event.key === 'ArrowLeft' ? -step : step), paneWidth)); } }}><span /></div>
-        <div className="mindmap-holder" hidden={mode === 'markdown'}><MindmapView key={`${note.readerId}:${note.checksum}`} document={note} visible={mode !== 'markdown'} selectedId={active} focus={mapFocus} onSelect={selectNode} onJump={viewOriginal} /></div>
+        <div className="mindmap-holder" hidden={mode === 'markdown'}><MindmapView key={`${note.readerId}:${note.checksum}`} document={note} visible={mode !== 'markdown'} selectedId={active} focus={mapFocus} onSelect={selectNode} onJump={viewOriginal} onSourceReference={url => onLink(classifyLink(url, note.content, note.archive))} /></div>
       </div>
       <footer className="reader-footer"><span>{note.encoding.toUpperCase()} · {note.archive ? '保留来源追溯' : '直接阅读，不执行分析'}</span><span>外部修改后点击刷新 · 图片不自动加载</span></footer>
     </main>

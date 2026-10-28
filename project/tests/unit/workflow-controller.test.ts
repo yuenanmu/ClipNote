@@ -31,3 +31,9 @@ test('cancel stops analysis, retains original source, and blocks concurrent star
 test('changed service after user confirmation never receives the source', async () => {
   const f=setup(); await f.handlers.start('trusted',document.sourceId,{baseUrl:'https://other.invalid/v1',model:credentials.model}); const state=await until(f.handlers,'failed'); assert.equal(state.error.code,'CONFIG_CHANGED'); assert.deepEqual(f.counts(),{requests:0,saves:0});
 });
+test('confirmed custom instructions are passed to analysis and oversized instructions are rejected', async () => {
+  let seen: string | undefined; const f=setup({ analyze: async (_s: any, _c: any, opts: any) => { seen=opts.instructions; return result; } });
+  assert.equal((await f.handlers.start('trusted',document.sourceId,{baseUrl:credentials.baseUrl,model:credentials.model,instructions:'x'.repeat(1001)})).status,'error');
+  assert.equal((await f.handlers.start('trusted',document.sourceId,{baseUrl:credentials.baseUrl,model:credentials.model,instructions:'保留示例'})).status,'ok');
+  await until(f.handlers,'succeeded'); assert.equal(seen,'保留示例');
+});

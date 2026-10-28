@@ -38,6 +38,12 @@ test('unknown compact identifiers still fail reference validation', async t => {
   const base = await server(t, (_req, res) => { const refs = [{ segmentId: 's999', startOffset: 0, endOffset: 1 }]; send(res, JSON.stringify({ title: '笔记', sections: [{ heading: '章节', refs, items: [{ kind: 'point', text: '要点', refs, children: [] }] }] })); });
   await assert.rejects(analyzeWithApi(source, credentials(base)), (error: any) => error.code === 'INVALID_REFERENCE');
 });
+test('analysis reports request count and time without exposing source or credentials', async t => {
+  const base = await server(t, (_req, res) => setTimeout(() => send(res, valid()), 40)); let metrics: any;
+  await analyzeWithApi(source, credentials(base), { onMetrics: value => { metrics = value; } });
+  assert.equal(metrics.requests, 1); assert.ok(metrics.apiMs >= 30); assert.ok(metrics.localMs >= 0); assert.ok(metrics.prepareMs >= 0);
+  assert.ok(!JSON.stringify(metrics).includes(secret)); assert.ok(!JSON.stringify(metrics).includes('合成原文'));
+});
 test('HTTP errors map to sanitized categories without retry or response body leakage', async t => {
   for (const [status, expected] of [[400,'INVALID_CONFIG'], [404,'INVALID_CONFIG'], [401,'AUTH_FAILED'], [402,'BALANCE'], [403,'PERMISSION_DENIED'], [408,'TIMEOUT'], [429,'RATE_LIMIT'], [500,'SERVER_ERROR'], [503,'SERVER_ERROR']] as const) {
     let count = 0; const base = await server(t, (_req,res) => { count++; res.writeHead(status, { 'Content-Type': 'application/json' }); res.end(JSON.stringify({ error: { message: secret } })); });

@@ -8,10 +8,11 @@ import { analyzeSource } from '../analysis/run.ts';
 import { AnalysisError } from '../analysis/errors.ts';
 export async function analyzeWithApi(source: SourceDocument, credentials: ApiConfigInput, options: AnalysisOptions = {}): Promise<AnalysisResult> {
   const inputCharBudget = Math.max(1000, Math.min(16000, Math.floor((credentials.contextWindow - credentials.maxTokens - 512) / 3)));
-  const profile = { provider: `api:${createHash('sha256').update(credentials.baseUrl).digest('hex')}`, model: credentials.model, promptVersion: 't06-v1', inputCharBudget, outputCharBudget: 64000, overlapChars: 0, inputByteBudget: Math.min(512000, credentials.contextWindow - credentials.maxTokens - 612) };
-  const adapter = createApiAdapter(credentials); let failure: ApiError | undefined;
-  try { return await analyzeSource(source, profile, async request => { try { return await adapter(request); } catch (error) { if (error instanceof ApiError) failure = error; throw error; } }, { ...options, splitTruncated: true }); }
+  const profile = { provider: `api:${createHash('sha256').update(credentials.baseUrl).digest('hex')}`, model: credentials.model, promptVersion: 't09-v2', inputCharBudget, outputCharBudget: 64000, overlapChars: 0, inputByteBudget: Math.min(512000, credentials.contextWindow - credentials.maxTokens - 612), ...(options.instructions ? { instructions: options.instructions } : {}) };
+  const adapter = createApiAdapter(credentials); let failure: ApiError | undefined; const started = performance.now(); let prepareMs = 0, apiMs = 0, requests = 0;
+  try { return await analyzeSource(source, profile, async request => { const begin = performance.now(); requests++; try { return await adapter(request); } catch (error) { if (error instanceof ApiError) failure = error; throw error; } finally { apiMs += performance.now() - begin; } }, { ...options, splitTruncated: true, onPrepared: ms => { prepareMs = ms; options.onPrepared?.(ms); } }); }
   catch (error) { if (failure && error instanceof AnalysisError && error.code === 'SERVICE_FAILED') { Object.assign(failure, { checkpoints: error.checkpoints }); throw failure; } throw error; }
+  finally { options.onMetrics?.({ prepareMs, apiMs, localMs: Math.max(0, performance.now() - started - prepareMs - apiMs), requests }); }
 }
 function compactReferences(request: string): { prompt: string; ids: Map<string, string> } {
   const ids = new Map<string, string>(), aliases = new Map<string, string>();

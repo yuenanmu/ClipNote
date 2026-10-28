@@ -2,6 +2,8 @@
 .analysis-confirm,.analysis-status { margin: 14px 32px; padding: 14px 16px; border: 1px solid #cadfd4; border-radius: 8px; background: #f1f8f4; color: #284b40; font-size: 13px; }
 .analysis-confirm p,.analysis-status p { line-height: 1.6; overflow-wrap:anywhere; }
 .analysis-confirm button,.analysis-status button { margin: 5px 8px 0 0; }
+.analysis-confirm label { display: block; font-weight: 600; }
+.analysis-confirm textarea { display: block; width: 100%; min-height: 76px; margin-top: 8px; padding: 9px 10px; border: 1px solid #b8cbc1; border-radius: 6px; background: white; color: #263c34; font: inherit; resize: vertical; }
 .saved-version { margin-bottom:10px; }
 .saved-version .saved-file { margin-bottom:0; }
 .read-version { margin:0 10px 8px; padding:5px 0; font-size:10px; color:#97c7b7; background:transparent; border:0; }

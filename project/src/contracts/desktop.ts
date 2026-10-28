@@ -12,7 +12,7 @@ export type ImportResult = { status: 'imported'; document: SourceDocument } | { 
 export type StorageResult<T> = { status: 'ok'; value: T } | { status: 'cancelled' } | { status: 'error'; error: { code: StorageErrorCode | 'FORBIDDEN_REQUEST' | 'STORAGE_BUSY'; message: string; draftId?: string } };
 export interface DesktopApi {
   workflowState(): Promise<WorkflowResult>;
-  workflowStart(sourceId: string, expected: { baseUrl: string; model: string }): Promise<WorkflowResult>;
+  workflowStart(sourceId: string, expected: { baseUrl: string; model: string; instructions?: string }): Promise<WorkflowResult>;
   workflowCancel(): Promise<WorkflowResult>;
   workflowRetrySave(): Promise<WorkflowResult>;
   apiState(): Promise<ApiResult<ApiState>>;

@@ -1,6 +1,7 @@
 import type { Nodes, Root } from 'mdast';
 import type { MindmapNode, ReaderPosition } from '../../contracts/reader.ts';
 function plain(node: Nodes): string {
+  if (node.type === 'link' && node.url.startsWith('clipnote-source:') && node.children[0]?.type === 'text' && node.children[0].value.startsWith('↗来源 ')) return '';
   if (node.type === 'break') return '\n';
   if (node.type === 'html') return '';
   if ('children' in node) return node.children.map(child => plain(child as Nodes)).join(node.type === 'table' || node.type === 'tableRow' ? ' · ' : '');
@@ -10,7 +11,11 @@ export function buildMindmap(root: Root): MindmapNode {
   const result: MindmapNode = { id: '@map-root', kind: 'root', label: '文档', children: [] };
   const headings: { depth: number; map: MindmapNode }[] = [];
   const position = (node: Nodes, blockIndex: number): ReaderPosition => ({ id: String((node.data as { readerId?: string })?.readerId), blockIndex });
-  const make = (node: Nodes, blockIndex: number, label: string, kind: MindmapNode['kind']): MindmapNode => ({ id: position(node, blockIndex).id, kind, label, target: position(node, blockIndex), children: [] });
+  const make = (node: Nodes, blockIndex: number, label: string, kind: MindmapNode['kind'], evidence: Nodes = node): MindmapNode => {
+    const pending: Nodes[] = [evidence], links: string[] = [];
+    while (pending.length) { const current = pending.pop()!; if (current.type === 'link' && current.url.startsWith('clipnote-source:') && current.children[0]?.type === 'text' && current.children[0].value.startsWith('↗来源 ')) links.push(current.url); else if ('children' in current) pending.push(...current.children as Nodes[]); }
+    return { id: position(node, blockIndex).id, kind, label: label.trim(), target: position(node, blockIndex), ...(links.length ? { sourceLinks: [...new Set(links)].reverse() } : {}), children: [] };
+  };
   function walk(nodes: Nodes[], parent: MindmapNode, blockIndex: number, inList = false) {
     let current = parent;
     const localHeadings: { depth: number; map: MindmapNode }[] = [];
@@ -23,7 +28,7 @@ export function buildMindmap(root: Root): MindmapNode {
       } else if (node.type === 'list') {
         for (const item of node.children) {
           const first = item.children[0]?.type === 'paragraph' ? item.children[0] : undefined;
-          const entry = make(item, blockIndex, first ? plain(first) || '列表项' : '列表项', 'listItem'); current.children.push(entry);
+          const entry = make(item, blockIndex, first ? plain(first) || '列表项' : '列表项', 'listItem', first ?? item); current.children.push(entry);
           walk(item.children.filter(child => child !== first) as Nodes[], entry, blockIndex, true);
         }
       } else if (node.type === 'blockquote') walk(node.children as Nodes[], current, blockIndex, inList);
