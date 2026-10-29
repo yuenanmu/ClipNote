@@ -27,6 +27,7 @@ export type WorkspaceAction = keyof WorkspaceActions;
 export interface WorkspaceChange { kind: WorkspaceKind; revision: number }
 export interface BatchConfig { baseUrl: string; model: string; instructions: string }
 export interface BatchItem {
+  reused?:boolean; startedAt?:number; finishedAt?:number; progress?:import("./analysis.ts").AnalysisProgress;
   id: string; name: string; outputName: string; outputPath?: string; overwrite: boolean;
   status: 'queued' | 'running' | 'succeeded' | 'failed' | 'cancelled'; error?: string; canRetrySave?: boolean;
   timing?:{prepareMs:number;apiMs:number;localMs:number;saveMs:number;requests:number};

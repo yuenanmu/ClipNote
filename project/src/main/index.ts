@@ -9,6 +9,7 @@ import { createApiHandlers } from './api-controller.ts';
 import { createWorkflowHandlers } from './workflow-controller.ts';
 import { createWorkspaceHandler } from './workspace-controller.ts';
 import { createBatchHandlers } from './batch-controller.ts';
+import { BatchReuse } from '../modules/api/batch-reuse.ts';
 import { WorkspaceFiles } from '../modules/workspace/files.ts';
 import { WorkspaceError } from '../modules/workspace/files.ts';
 import { NoteResults } from '../modules/workspace/results.ts';
@@ -162,15 +163,18 @@ app.whenReady().then(() => {
     save: (source, result) => tasks.run(join(__dirname, 'storage-worker.cjs'), { stateDir: join(local, 'storage'), action: 'save-generated', payload: { snapshot: source, markdown: result.markdown, metadata: { kind: 'generated-note', provider: result.attempt.provider, model: result.attempt.model, promptVersion: result.attempt.promptVersion, sourceRefs: result.sourceRefs } } }, true),
     resume: draftId => tasks.run(join(__dirname, 'storage-worker.cjs'), { stateDir: join(local, 'storage'), action: 'resume', payload: { draftId } }, true),
   });
-  const batchHandlers = createBatchHandlers({ isTrustedSender: trusted,
+  const batchReuse=new BatchReuse();
+  const batchHandlers = createBatchHandlers({ isTrustedSender: trusted,resetAnalysis:()=>batchReuse.clear(),
     config: async () => { const value = await apiStore.state(); if (!value.configured) throw new ApiError('INVALID_CONFIG'); return value; },
     preview: (id, target) => workspace.previewOutput(id, target),
-    analyze: async (id, expected, signal,plan) => { const credentials = await apiStore.credentials(); if (credentials.baseUrl !== expected.baseUrl || credentials.model !== expected.model) throw new ApiError('INVALID_CONFIG');
+    analyze: async (id, expected, signal,plan,report) => { const credentials = await apiStore.credentials(); if (credentials.baseUrl !== expected.baseUrl || credentials.model !== expected.model) throw new ApiError('INVALID_CONFIG');
       const started=performance.now();
       const source:SourceSnapshot = await tasks.run(join(__dirname, 'source-worker.cjs'), { filePath: await workspace.filePath('source', id) });
       if(plan.sourceChecksum && source.document.checksum!==plan.sourceChecksum)throw new WorkspaceError('CONFLICT');
       const prepareMs=performance.now()-started;let metrics:AnalysisMetrics={prepareMs:0,apiMs:0,localMs:0,requests:0};
-      const value=await runAnalysisWorker(join(__dirname, 'analysis-worker.cjs'), source.document, credentials, { signal, instructions: expected.instructions,onMetrics:value=>{metrics=value;} });return {...value,timing:{...metrics,prepareMs:prepareMs+metrics.prepareMs,saveMs:0}}; },
+      const value=await batchReuse.run(source.document,credentials,expected.instructions??'',signal,async(checkpoints)=>{
+        const result=await runAnalysisWorker(join(__dirname, 'analysis-worker.cjs'), source.document, credentials, { signal, checkpoints, instructions: expected.instructions,onProgress:value=>report(value),onMetrics:value=>{metrics=value;report(undefined,{...metrics,prepareMs:prepareMs+metrics.prepareMs,saveMs:0});} });return result.markdown;
+      });return {...value,timing:{...metrics,prepareMs:prepareMs+metrics.prepareMs,saveMs:0}}; },
     save: (id, target, plan, markdown) => workspace.writeOutput(id, target, plan, markdown),
     lock:plans=>workspace.lockPaths(plans.flatMap(plan=>[plan.sourcePath,plan.notePath])),
     stage:(plan,markdown)=>results.add(plan,markdown),complete:id=>results.remove(id),

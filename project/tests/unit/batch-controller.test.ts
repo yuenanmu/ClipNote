@@ -4,6 +4,14 @@ import { createBatchHandlers } from '../../src/main/batch-controller.ts';
 const ids=['11111111-1111-4111-8111-111111111111','22222222-2222-4222-8222-222222222222'];
 const target='33333333-3333-4333-8333-333333333333', config={baseUrl:'https://fixture.invalid',model:'fixture',instructions:''};
 const tick=()=>new Promise(resolve=>setTimeout(resolve,5));
+test('running and failed items retain live progress and timing from the analyzer',async()=>{
+  let fail:()=>void=()=>{};
+  const h=createBatchHandlers({isTrustedSender:()=>true,config:async()=>config,preview:async(id:string)=>({sourcePath:id,notePath:id+'.md',name:id+'.md',exists:false}),
+    analyze:async(_id:any,_config:any,_signal:any,_plan:any,report:any)=>{report({phase:'receiving',requests:1,chunkIndex:0},{prepareMs:2,apiMs:30,localMs:0,saveMs:0,requests:1});await new Promise<void>(resolve=>{fail=resolve;});throw new Error('synthetic failure');},save:async()=>{}});
+  await h.prepare('trusted',[ids[0]],target,config);await h.start('trusted');await tick();
+  const running:any=await h.state('trusted');assert.equal(running.value.items[0].progress.phase,'receiving');assert.ok(running.value.items[0].startedAt);
+  fail();const done=await until(h,'done');assert.equal(done.items[0].timing.requests,1);assert.equal(done.items[0].timing.apiMs,30);assert.ok(done.items[0].finishedAt);
+});
 async function until(handlers:any,status:string) { for(let i=0;i<100;i++){ const r=await handlers.state('trusted'); if(r.value?.status===status)return r.value; await tick(); } throw new Error('missing batch status'); }
 test('batch asks for explicit confirmation, runs serially and continues after failure', async () => {
   let active=0, max=0; const calls:string[]=[], saved:string[]=[];

@@ -8,8 +8,9 @@ import type {BatchState,BatchItem,WorkspaceResult} from '../contracts/workspace.
 type Config = { baseUrl: string; model: string; instructions?: string };
 interface Dependencies {
   isTrustedSender(event: unknown): boolean; config(): Promise<{ baseUrl: string; model: string }>;
+  resetAnalysis?():void;
   preview(id: string, target: string): Promise<OutputPlan>;
-  analyze(id: string, config: Config, signal: AbortSignal, plan: OutputPlan): Promise<{ markdown: string;timing?:BatchItem['timing'] }>;
+  analyze(id: string, config: Config, signal: AbortSignal, plan: OutputPlan, report:(progress:BatchItem['progress'],timing?:BatchItem['timing'])=>void): Promise<{ markdown: string;timing?:BatchItem['timing'];reused?:boolean }>;
   save(id: string, target: string, plan: OutputPlan, markdown: string): Promise<void>;
   lock?(plans: OutputPlan[]):()=>void;
   stage?(plan:OutputPlan,markdown:string):Promise<string>;
@@ -26,19 +27,20 @@ export function createBatchHandlers(deps: Dependencies): Record<'state' | 'prepa
     for (const item of state.items) {
       if (item.status !== 'queued') continue;
       if (signal.aborted) { item.status = 'cancelled'; continue; }
+      if(!pending.has(item.id)){item.timing=undefined;item.reused=false;}item.startedAt=Date.now();item.finishedAt=undefined;item.progress=undefined;
       item.status = 'running'; item.error = undefined; item.canRetrySave = false;
       let saveStarted:number|undefined;
       try {
-        let markdown=pending.get(item.id);if(markdown===undefined){const result=await deps.analyze(item.id,config!,signal,plans.get(item.id)!);markdown=result.markdown;item.timing=result.timing;}
+        let markdown=pending.get(item.id);if(markdown===undefined){const result=await deps.analyze(item.id,config!,signal,plans.get(item.id)!,(progress,timing)=>{if(item.status==='running'){if(progress)item.progress=progress;if(timing)item.timing=timing;}});markdown=result.markdown;item.timing=result.timing;item.reused=result.reused;}
         if (signal.aborted) { item.status = 'cancelled'; continue; }
         pending.set(item.id, markdown);
-        saveStarted=performance.now();
+        saveStarted=performance.now();item.progress={phase:'saving',requests:item.timing?.requests??0,chunkIndex:0};
         if(deps.stage && !drafts.has(item.id)) drafts.set(item.id,await deps.stage(plans.get(item.id)!,markdown));
         if(signal.aborted){item.status='cancelled';continue;}
         await deps.save(item.id, target, plans.get(item.id)!, markdown);
         const draft=drafts.get(item.id);if(draft && deps.complete)await deps.complete(draft);drafts.delete(item.id);pending.delete(item.id); item.status = 'succeeded';
       } catch (error) { item.status = signal.aborted ? 'cancelled' : 'failed'; if (!signal.aborted) { item.error = safe(error); item.canRetrySave = pending.has(item.id); } }
-      finally{if(item.timing && saveStarted!==undefined)item.timing.saveMs+=performance.now()-saveStarted;}
+      finally{item.finishedAt=Date.now();if(item.timing && saveStarted!==undefined)item.timing.saveMs+=performance.now()-saveStarted;}
     }
     release?.();release=undefined;state.status = signal.aborted ? 'cancelled' : 'done'; abort = undefined;
   };
@@ -57,7 +59,7 @@ export function createBatchHandlers(deps: Dependencies): Record<'state' | 'prepa
         const next = new Map<string, OutputPlan>(), names = new Set<string>();
         for (const id of ids) { const plan = await deps.preview(id, folder); const key = plan.notePath.toLowerCase(); if (names.has(key)) return failure('所选资料存在同名输出，请先重命名。'); names.add(key); next.set(id, plan); }
         target = folder; config = { baseUrl: selected.baseUrl, model: selected.model, instructions: selected.instructions }; plans = next; pending = new Map();
-        drafts.clear();state = { status: 'ready', baseUrl: config.baseUrl, model: config.model, items: ids.map(id => ({ id, name: basename(next.get(id)!.sourcePath), outputName: next.get(id)!.name, outputPath:next.get(id)!.notePath, overwrite: next.get(id)!.exists, status: 'queued' })) }; return snapshot();
+        deps.resetAnalysis?.();drafts.clear();state = { status: 'ready', baseUrl: config.baseUrl, model: config.model, items: ids.map(id => ({ id, name: basename(next.get(id)!.sourcePath), outputName: next.get(id)!.name, outputPath:next.get(id)!.notePath, overwrite: next.get(id)!.exists, status: 'queued' })) }; return snapshot();
       } catch (error) { return failure(safe(error)); } finally { preparing = false; }
     }
     if (action === 'start') {
