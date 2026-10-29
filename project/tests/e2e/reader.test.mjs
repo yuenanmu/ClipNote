@@ -70,15 +70,15 @@ test('offline Markdown reader shares anchors, refreshes safely and traces archiv
     assert.equal(readFileSync(path, 'utf8').endsWith('完整末尾。'), true);
   });
   await t.test('an edited archive note opens with source references after deleting its original file', async () => {
-    await page.getByRole('button', { name: '返回文件工作台', exact: true }).click();
+    await page.getByRole('button', { name: '文件导入', exact: true }).click();
     const input = join(own, '来源.srt'); writeFileSync(input, '1\n00:00:01,000 --> 00:00:02,000\n第一条依据\n\n2\n00:00:03,000 --> 00:00:04,000\n第二条依据');
-    await picker(input); await page.getByRole('button', { name: '导入文件', exact: true }).click(); await page.getByRole('heading', { name: '来源.srt', exact: true }).waitFor();
-    await picker(output); await page.getByRole('button', { name: '选择保存目录', exact: true }).click(); await page.getByRole('button', { name: '保存来源', exact: true }).click(); await page.getByText('来源已保存，已创建独立版本。', { exact: true }).waitFor();
-    await page.getByRole('button', { name: '导入文件', exact: true }).waitFor();
+    await picker(input); await page.getByRole('button', { name: '打开文件', exact: true }).click(); await page.getByRole('heading', { name: '来源.srt', exact: true }).waitFor();
+    const imported=await page.evaluate(()=>window.clipnote.importSource());await picker(output);assert.equal((await page.evaluate(()=>window.clipnote.chooseLibrary())).status,'ok');assert.equal((await page.evaluate(id=>window.clipnote.saveSource(id),imported.document.sourceId)).status,'ok');
+    await page.getByRole('button', { name: '打开文件', exact: true }).waitFor();
     const state = await page.evaluate(() => window.clipnote.libraryState()); assert.equal(state.status, 'ok'); const saved = state.value.revisions[0];
     const opened = await page.evaluate(({ sourceId, revisionId }) => window.clipnote.openRevision(sourceId, revisionId), saved); const segmentId = opened.value.document.segments[1].segmentId;
     writeFileSync(saved.notePath, '# 已编辑的归档\n\n[实际依据](clipnote-source:' + segmentId + ')'); unlinkSync(input);
-    await page.getByRole('button', { name: /^阅读笔记 来源.srt/ }).click(); await page.getByRole('button', { name: 'Markdown', exact: true }).click(); await page.getByRole('button', { name: '定位标题 已编辑的归档', exact: true }).waitFor();
+    await page.getByRole('button',{name:'旧归档',exact:true}).click();await page.getByRole('dialog',{name:'旧归档',exact:true}).locator('.archive-entry').filter({hasText:'来源.srt'}).first().click(); await page.getByRole('button', { name: 'Markdown', exact: true }).click(); await page.getByRole('button', { name: '定位标题 已编辑的归档', exact: true }).waitFor();
     await page.getByText('此笔记已被外部修改，当前显示磁盘内容。', { exact: true }).waitFor();
     assert.equal(await page.getByRole('button', { name: '实际依据', exact: true }).isDisabled(), true);
     assert.equal(await page.getByRole('button', { name: '查看来源', exact: true }).count(), 0);

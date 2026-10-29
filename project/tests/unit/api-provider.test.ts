@@ -14,6 +14,31 @@ const credentials = (baseUrl: string): ApiConfigInput => ({ baseUrl, apiKey: sec
 function send(response: any, text: string, finish = 'stop') { response.writeHead(200, { 'Content-Type': 'text/event-stream' }); response.write(`data: ${JSON.stringify({ id: 'fixture', object: 'chat.completion.chunk', model: profile.model, choices: [{ index: 0, delta: { role: 'assistant', content: text }, finish_reason: null }] })}\n\n`); response.write(`data: ${JSON.stringify({ id: 'fixture', object: 'chat.completion.chunk', model: profile.model, choices: [{ index: 0, delta: {}, finish_reason: finish }] })}\n\n`); response.end('data: [DONE]\n\n'); }
 const valid = () => { const ref = { segmentId: source.segments[0].segmentId, startOffset: 0, endOffset: source.segments[0].text.length }; return JSON.stringify({ title: '笔记', sections: [{ heading: '章节', refs: [ref], items: [{ kind: 'point', text: '要点', refs: [ref], children: [] }] }] }); };
 
+test('deadline and cancellation settle promptly even when transport ignores abort', async t => {
+  // Load the fixed SDK before measuring the request deadline.
+  await import('@earendil-works/pi-ai');
+  await import('@earendil-works/pi-ai/api/openai-completions.lazy');
+  for (const cancelled of [false, true]) {
+    let calls = 0;
+    const mock = t.mock.method(globalThis, 'fetch', async () => {
+      calls++;
+      await new Promise(resolve => setTimeout(resolve, 800));
+      return new Response('{}', { status: 503 });
+    });
+    const controller = new AbortController();
+    const timer = cancelled ? setTimeout(() => controller.abort(), 40) : undefined;
+    const started = performance.now();
+    try {
+      await assert.rejects(createApiAdapter(credentials('http://127.0.0.1:1/v1'), cancelled ? 2000 : 80)({
+        chunk: { chunkId: 'deadline', index: 0, core: [], context: [], request: 'synthetic' },
+        profile, repair: false, signal: controller.signal,
+      }), (error: any) => error.code === (cancelled ? 'CANCELLED' : 'TIMEOUT'));
+      assert.ok(performance.now() - started < 500, 'caller must not wait for an abort-ignoring transport');
+      assert.equal(calls, 1);
+    } finally { clearTimeout(timer); mock.mock.restore(); }
+  }
+});
+
 test('pi-ai sends one configured request and the result passes actual T06 validation', async t => {
   let count = 0, received: any; const base = await server(t, async (req, res) => { count++; const chunks = []; for await (const chunk of req) chunks.push(chunk); received = { url: req.url, auth: req.headers.authorization, body: JSON.parse(Buffer.concat(chunks).toString()) }; send(res, valid()); });
   const result = await analyzeSource(source, profile, createApiAdapter(credentials(base)));
@@ -37,6 +62,29 @@ test('short reference identifiers reduce repeated model output while preserving 
 test('unknown compact identifiers still fail reference validation', async t => {
   const base = await server(t, (_req, res) => { const refs = [{ segmentId: 's999', startOffset: 0, endOffset: 1 }]; send(res, JSON.stringify({ title: '笔记', sections: [{ heading: '章节', refs, items: [{ kind: 'point', text: '要点', refs, children: [] }] }] })); });
   await assert.rejects(analyzeWithApi(source, credentials(base)), (error: any) => error.code === 'INVALID_REFERENCE');
+});
+
+test('range aliases eliminate output coordinates while retaining exact Unicode source ranges', async t => {
+  const input = parseSource(Buffer.from('中文😀内容。\n\n第二段。'), 'ranges.txt');
+  let compactLength = 0, legacyLength = 0;
+  const base = await server(t, async (req, res) => {
+    const bytes = []; for await (const part of req) bytes.push(part);
+    const prompt = JSON.parse(Buffer.concat(bytes).toString()).messages.at(-1).content;
+    const core = JSON.parse(prompt.split('\n')[1]).core;
+    const refs = core.map((ref: any) => ref.refId);
+    const output = { title: '笔记', sections: [{ heading: '章节', refs, items: [{ kind: 'point', text: '保留内容', refs, children: [] }] }] };
+    compactLength = JSON.stringify(output).length;
+    legacyLength = JSON.stringify(output).replaceAll(JSON.stringify(refs), JSON.stringify(core.map(({segmentId,startOffset,endOffset}: any) => ({segmentId,startOffset,endOffset})))).length;
+    send(res, JSON.stringify(output));
+  });
+  const result = await analyzeWithApi(input, credentials(base));
+  assert.deepEqual(result.outline.sections[0].refs, input.segments.map(segment => ({ segmentId:segment.segmentId, startOffset:0, endOffset:segment.text.length })));
+  assert.ok(compactLength < legacyLength - 100);
+});
+
+test('unknown range aliases never gain a valid source reference', async t => {
+  const base = await server(t, (_req,res) => send(res, JSON.stringify({title:'笔记',sections:[{heading:'章节',refs:['r999'],items:[{kind:'point',text:'内容',refs:['r999'],children:[]}]}]})));
+  await assert.rejects(analyzeWithApi(source,credentials(base)), (error:any) => error.code==='INVALID_REFERENCE');
 });
 test('analysis reports request count and time without exposing source or credentials', async t => {
   const base = await server(t, (_req, res) => setTimeout(() => send(res, valid()), 40)); let metrics: any;
@@ -130,4 +178,31 @@ test('repeated length limits stop within a bounded number of calls and never pub
   const long = parseSource(Buffer.from('原文'.repeat(400)), '合成.txt'); let calls = 0;
   const base = await server(t, (_req, res) => { calls++; send(res, '{', 'length'); });
   await assert.rejects(analyzeWithApi(long, credentials(base)), (error: any) => error.code === 'TRUNCATED'); assert.ok(calls <= 4);
+});
+
+test('one file shares a request budget across format repair and truncation splitting',async t=>{
+  let calls=0;
+  const base=await server(t,(_req,res)=>{calls++;send(res,'{',calls===1?'stop':'length');});
+  await assert.rejects(analyzeWithApi(source,credentials(base),{maxRequests:2}), (error:any)=>error.code==='REQUEST_LIMIT');
+  assert.equal(calls,2);
+});
+test('whole-file deadline stops a waiting request and retains failure metrics',async t=>{
+  const base=await server(t,(_req,res)=>{setTimeout(()=>{if(!res.destroyed)send(res,valid());},300);});
+  let metrics:any;const began=performance.now();
+  await assert.rejects(analyzeWithApi(source,credentials(base),{deadlineMs:50,onMetrics:value=>{metrics=value;}}),(error:any)=>error.code==='TIMEOUT');
+  assert.ok(performance.now()-began<250);assert.equal(metrics.requests,1);assert.ok(metrics.apiMs>0);
+});
+test('range IDs distinguish disjoint ranges and context within the same Unicode segment',async t=>{
+  const text='甲😀乙丙丁', id=source.segments[0].segmentId;
+  const core=[{segmentId:id,startOffset:0,endOffset:3,text:text.slice(0,3)}];
+  const context=[{segmentId:id,startOffset:4,endOffset:6,text:text.slice(4,6)}];
+  const base=await server(t,async(req,res)=>{
+    const parts=[];for await(const part of req)parts.push(part);
+    const payload=JSON.parse(JSON.parse(Buffer.concat(parts).toString()).messages.at(-1).content.split('\n')[1]);
+    assert.notEqual(payload.core[0].refId,payload.context[0].refId);
+    const refs=[payload.core[0].refId,payload.context[0].refId];
+    send(res,JSON.stringify({title:'范围',sections:[{heading:'章节',refs,items:[]}]}));
+  });
+  const result=await createApiAdapter(credentials(base))({chunk:{chunkId:'ranges',index:0,core,context,request:'规则\n'+JSON.stringify({core,context})},profile,repair:false});
+  assert.deepEqual((result.value as any).sections[0].refs,[{segmentId:id,startOffset:0,endOffset:3},{segmentId:id,startOffset:4,endOffset:6}]);
 });
