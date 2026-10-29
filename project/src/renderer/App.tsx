@@ -11,10 +11,11 @@ import {FileIcon,ToolButton} from './FileIcon.tsx';
 import {workspaceValue,unwrap} from './workspace-api.ts';
 import {ReaderView} from './features/reader/ReaderView.tsx';
 import {ApiSettings} from './features/api/ApiSettings.tsx';
+import {SmartSubPanel} from './SmartSubPanel.tsx';
 declare global {interface Window {clipnote:DesktopApi}}
 interface EditSession {id:string;name:string;text:string;baseText:string;checksum:string;conflict?:boolean}
 export function App(){
-  const [area,setArea]=useState<'source'|'notes'>('source'),[api,setApi]=useState(false),[archive,setArchive]=useState(false),[source,setSource]=useState<SourceDocument>(),[sourceId,setSourceId]=useState<string>();
+  const [area,setArea]=useState<'source'|'notes'>('source'),[api,setApi]=useState(false),[smartsub,setSmartsub]=useState(false),[archive,setArchive]=useState(false),[source,setSource]=useState<SourceDocument>(),[sourceId,setSourceId]=useState<string>();
   const [note,setNote]=useState<ReaderDocument>(),[noteId,setNoteId]=useState<string>(),[edit,setEdit]=useState<EditSession>(),[notice,setNotice]=useState<{text:string;error?:boolean}>(),[loading,setLoading]=useState(false),[saving,setSaving]=useState(false);
   const [batchIds,setBatchIds]=useState<string[]>([]),[openRequest,setOpenRequest]=useState(0),[aiRunning,setAiRunning]=useState(false),[confirmLeave,setConfirmLeave]=useState(false);
   const [width,setWidth]=useState(()=>{try{const value=Number(window.localStorage.getItem('clipnote.explorer.width'));return value>=230 && value<=480?value:280;}catch{return 280;}});
@@ -44,6 +45,7 @@ export function App(){
   const changeArea=(value:'source'|'notes')=>navigate(()=>{setEdit(undefined);setArea(value);setNotice(undefined);});
   const size=(value:number)=>setWidth(Math.max(230,Math.min(480,value)));
   if(api)return <ApiSettings onBack={()=>setApi(false)}/>;
+  if(smartsub)return <SmartSubPanel onBack={()=>setSmartsub(false)} onSource={value=>{setSource(value.document);setSourceId(value.entryId);setBatchIds([value.entryId]);setArea('source');setSmartsub(false);}}/>;
   return <div className="app-shell file-shell" style={{gridTemplateColumns:`${width}px 5px minmax(0,1fr)`}}>
     <aside className="file-sidebar"><div className="file-brand"><span><FileIcon size={23}/></span><strong>ClipNote</strong></div><nav className="file-areas" aria-label="工作区"><button aria-label="文件导入" aria-current={area==='source'?'page':undefined} onClick={()=>changeArea('source')}><FileIcon name="layers"/>资料</button><button aria-current={area==='notes'?'page':undefined} onClick={()=>changeArea('notes')}><FileIcon/>笔记</button><ToolButton label="API 设置" icon="settings" onClick={()=>navigate(()=>setApi(true))}/></nav>
       <div className="file-explorer-slot" hidden={area!=='source'}><WorkspaceTree onRequestRootChange={navigate} kind="source" onOpen={openSource} onSelectionChange={entries=>setBatchIds(entries.filter(entry=>entry.kind==='file').map(entry=>entry.id))} onClear={()=>{setSource(undefined);setSourceId(undefined);setBatchIds([]);}}/></div>
@@ -52,7 +54,7 @@ export function App(){
     </aside>
     <div className="file-sidebar-divider" role="separator" aria-label="调整文件侧栏宽度" aria-orientation="vertical" aria-valuemin={230} aria-valuemax={480} aria-valuenow={width} tabIndex={0} onPointerDown={event=>{dragging.current=true;event.currentTarget.setPointerCapture(event.pointerId);}} onPointerMove={event=>{if(dragging.current)size(event.clientX);}} onPointerUp={event=>{dragging.current=false;if(event.currentTarget.hasPointerCapture(event.pointerId))event.currentTarget.releasePointerCapture(event.pointerId);try{window.localStorage.setItem('clipnote.explorer.width',String(width));}catch{}}} onPointerCancel={()=>{dragging.current=false;}} onKeyDown={event=>{if(event.key==='ArrowLeft' || event.key==='ArrowRight'){event.preventDefault();size(width+(event.key==='ArrowLeft'?-16:16));}}}/>
     <div className="file-content">
-      <main className="desktop source-desktop" hidden={area!=='source'} aria-busy={loading}><header className="toolbar"><div><p className="eyebrow">资料 / 本地文件</p><h1 title={source?.fileName}>{source?.fileName??'文件导入'}</h1><p className="toolbar-caption">打开真实文件，按主题组织资料。</p></div><div className="toolbar-actions">{source?.format==='md' && <button className="secondary" onClick={readSourceMarkdown}>阅读 Markdown</button>}<button className="secondary" disabled={!sourceId || aiRunning} onClick={()=>{if(batchIds.length<2 && sourceId)setBatchIds([sourceId]);setOpenRequest(value=>value+1);}}>AI 整理</button><button className="primary" onClick={()=>navigate(()=>void importFile())}><FileIcon name="folderOpen"/>打开文件</button></div></header>
+      <main className="desktop source-desktop" hidden={area!=='source'} aria-busy={loading}><header className="toolbar"><div><p className="eyebrow">资料 / 本地文件</p><h1 title={source?.fileName}>{source?.fileName??'文件导入'}</h1><p className="toolbar-caption">打开真实文件，按主题组织资料。</p></div><div className="toolbar-actions"><button className="secondary" onClick={()=>navigate(()=>setSmartsub(true))}>视频链接</button>{source?.format==='md' && <button className="secondary" onClick={readSourceMarkdown}>阅读 Markdown</button>}<button className="secondary" disabled={!sourceId || aiRunning} onClick={()=>{if(batchIds.length<2 && sourceId)setBatchIds([sourceId]);setOpenRequest(value=>value+1);}}>AI 整理</button><button className="primary" onClick={()=>navigate(()=>void importFile())}><FileIcon name="folderOpen"/>打开文件</button></div></header>
         <BatchPanel ids={batchIds} instructions={(()=>{try{return window.localStorage.getItem('clipnote.analysis.instructions')??'';}catch{return '';}})()} onBusy={setAiRunning} openRequest={openRequest}/>
         {area==='source' && notice && <div className={`notice ${notice.error?'error':''}`} role={notice.error?'alert':'status'}>{notice.text}</div>}<SourceWorkspace document={source} importFile={importFile} busy={loading}/>
       </main>

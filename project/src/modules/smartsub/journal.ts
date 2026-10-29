@@ -5,7 +5,7 @@ import {makeDownloadRequest,makeTaskRequest} from './requests.ts';
 
 const states=['prepared','queued','running','paused','review','cancelling','completed','failed','cancelled','interrupted'] as const;
 type State=typeof states[number];
-export interface SmartSubRecord {version:1;requestId:string;inputHash:string;status:State;taskId?:string}
+export interface SmartSubRecord {version:1;requestId:string;inputHash:string;status:State;taskId?:string;binding?:string}
 /** Durable identity only: private links and subtitle text are never persisted here. */
 export class SmartSubJournal {
   private readonly directory:string;
@@ -13,14 +13,15 @@ export class SmartSubJournal {
   constructor(directory:string){this.directory=resolve(directory);}
   private path(id:string){if(!isUuid(id))throw new Error('任务标识无效。');return join(this.directory,id+'.json');}
   private serial<T>(action:()=>Promise<T>):Promise<T>{const next=this.queue.then(action,action);this.queue=next.catch(()=>{});return next;}
-  async prepare(url:string,cachePath:string):Promise<SmartSubRecord>{
-    const requestId=randomUUID(),input=makeDownloadRequest(url,cachePath,requestId);
-    const value:SmartSubRecord={version:1,requestId,inputHash:digest(JSON.stringify(input.config)),status:'prepared'};
+  async prepare(url:string,cachePath:string,requestId=randomUUID(),binding?:string):Promise<SmartSubRecord>{
+    const input=makeDownloadRequest(url,cachePath,requestId);
+    if(binding!==undefined && !/^[a-f0-9]{64}$/.test(binding))throw new Error('SmartSub 身份无效。');
+    const value:SmartSubRecord={version:1,requestId,inputHash:digest(JSON.stringify(input.config)),status:'prepared',...(binding?{binding}:{})};
     await writeAtomic(this.path(requestId),value);return value;
   }
   async reopen(id:string):Promise<SmartSubRecord>{
     const value=await readJson(this.path(id));
-    if(value.version!==1 || value.requestId!==id || typeof value.inputHash!=='string' || !/^[a-f0-9]{64}$/.test(value.inputHash) || !states.includes(value.status) || Object.keys(value).some(key=>!['version','requestId','inputHash','status','taskId'].includes(key)))throw new Error('任务记录损坏。');
+    if(value.version!==1 || value.requestId!==id || typeof value.inputHash!=='string' || !/^[a-f0-9]{64}$/.test(value.inputHash) || !states.includes(value.status) || (value.binding!==undefined && (typeof value.binding!=='string' || !/^[a-f0-9]{64}$/.test(value.binding))) || Object.keys(value).some(key=>!['version','requestId','inputHash','status','taskId','binding'].includes(key)))throw new Error('任务记录损坏。');
     if(value.taskId!==undefined)makeTaskRequest(value.taskId);
     if(value.status!=='prepared' && value.taskId===undefined)throw new Error('任务记录损坏。');
     return value as SmartSubRecord;

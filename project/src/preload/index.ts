@@ -1,6 +1,21 @@
 import { contextBridge, ipcRenderer } from 'electron';
 import type { DesktopApi } from '../contracts/desktop.ts';
 const api: DesktopApi = {
+  smartsubState:(...args:unknown[])=>ipcRenderer.invoke('smartsub:state',...args),
+  smartsubChoose:(...args:unknown[])=>ipcRenderer.invoke('smartsub:choose',...args),
+  smartsubOpenOfficial:(...args:unknown[])=>ipcRenderer.invoke('smartsub:openOfficial',...args),
+  smartsubReadiness:(...args:unknown[])=>ipcRenderer.invoke('smartsub-task:readiness',...args),
+  smartsubPrepare:(...args)=>ipcRenderer.invoke('smartsub-task:prepare',...args),
+  smartsubSubmit:(...args)=>ipcRenderer.invoke('smartsub-task:submit',...args),
+  smartsubRefresh:(...args)=>ipcRenderer.invoke('smartsub-task:refresh',...args),
+  smartsubCancel:(...args)=>ipcRenderer.invoke('smartsub-task:cancel',...args),
+  smartsubImportSubtitle:(...args)=>ipcRenderer.invoke('smartsub-task:importSubtitle',...args),
+  smartsubTranscriptionReady:(...args)=>ipcRenderer.invoke('smartsub-task:transcriptionReady',...args),
+  smartsubTranscribe:(...args)=>ipcRenderer.invoke('smartsub-task:transcribe',...args),
+  smartsubTranscriptionRetry:(...args)=>ipcRenderer.invoke('smartsub-task:transcriptionRetry',...args),
+  smartsubTranscriptionRefresh:(...args)=>ipcRenderer.invoke('smartsub-task:transcriptionRefresh',...args),
+  smartsubTranscriptionCancel:(...args)=>ipcRenderer.invoke('smartsub-task:transcriptionCancel',...args),
+  smartsubTranscriptionImport:(...args)=>ipcRenderer.invoke('smartsub-task:transcriptionImport',...args),
   workspace: (...args: unknown[]) => ipcRenderer.invoke('workspace:action', ...args),
   onWorkspaceChanged:listener=>{const handler=(_event:unknown,value:Parameters<typeof listener>[0])=>listener(value);ipcRenderer.on('workspace:changed',handler);return()=>ipcRenderer.removeListener('workspace:changed',handler);},
   savedResults:()=>ipcRenderer.invoke('results:list'),
