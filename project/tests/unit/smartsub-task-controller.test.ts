@@ -12,3 +12,9 @@ test('task bridge rejects untrusted callers and arbitrary arguments',async()=>{
   assert.equal((await handlers.prepare('trusted','https://example.com')).status,'ok');
   assert.deepEqual(calls,['https://example.com']);
 });
+
+test('missing task files produce an actionable message without raw filesystem diagnostics',async()=>{
+  const handlers=createSmartSubTaskHandlers({isTrustedSender:()=>true,refresh:async()=>{throw Object.assign(new Error('ENOENT: private path'),{code:'ENOENT'});}} as any);
+  const result=await handlers.refresh('trusted','00000000-0000-4000-8000-000000000001');
+  assert.equal(result.status,'error');if(result.status==='error'){assert.match(result.error.message,/任务记录.*缺失/);assert.ok(!result.error.message.includes('private path'));}
+});

@@ -21,7 +21,12 @@ export function createSmartSubTaskHandlers(deps:Dependencies){
   const fail=(message:string):WorkspaceResult<never>=>({status:'error',error:{code:'SMARTSUB_ERROR',message}});
   const call=async<T>(event:unknown,args:unknown[],valid:boolean,work:()=>Promise<T>):Promise<WorkspaceResult<T>>=>{
     if(!deps.isTrustedSender(event) || !valid)return fail('任务参数无效。');
-    try{return {status:'ok',value:await work()};}catch(error){return fail(error instanceof Error && error.message.length<=160?error.message:'SmartSub 操作失败，请重试。');}
+    try{return {status:'ok',value:await work()};}catch(error){
+      const code=error && typeof error==='object' && 'code' in error?error.code:undefined;
+      if(code==='ENOENT' || code==='DAMAGED_DATA')return fail('任务记录或所需文件缺失、损坏，无法确认任务状态。');
+      if(code==='EACCES' || code==='EPERM')return fail('无法读取任务文件，请检查文件权限后重试。');
+      return fail(error instanceof Error && error.message.length<=160?error.message:'SmartSub 操作失败，请重试。');
+    }
   };
   const url=(value:unknown):value is string=>typeof value==='string' && value.length<=4096;
   return {
