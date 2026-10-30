@@ -15,3 +15,12 @@ test('installation detection and user selection reject untrusted input and persi
   assert.deepEqual(await handlers.state('trusted'),{status:'ok',value:{installed:true,path:valid.root}});
   assert.equal((await handlers.openOfficial('trusted')).status,'ok');assert.equal(opened,1);
 });
+
+test('parallel read-only discovery cannot block task cancellation with a busy error',async()=>{
+  let finish!:(value:undefined)=>void;
+  const handlers=createSmartSubDiscoveryHandlers({isTrustedSender:()=>true,load:async()=>undefined,save:async()=>{},candidates:()=>[],find:()=>new Promise(resolve=>{finish=resolve;}),choose:async()=>undefined,openOfficial:async()=>{}});
+  const first=handlers.state('trusted');await new Promise(resolve=>setImmediate(resolve));const releaseFirst=finish;
+  const second=handlers.state('trusted');await new Promise(resolve=>setImmediate(resolve));const releaseSecond=finish;
+  releaseFirst(undefined);releaseSecond(undefined);
+  assert.equal((await first).status,'ok');assert.equal((await second).status,'ok');
+});

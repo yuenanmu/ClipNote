@@ -1,6 +1,8 @@
 import { contextBridge, ipcRenderer } from 'electron';
 import type { DesktopApi } from '../contracts/desktop.ts';
 const api: DesktopApi = {
+  smartsubPreferences:(...args:unknown[])=>ipcRenderer.invoke('smartsub-preferences:state',...args),
+  smartsubSavePreferences:(...args)=>ipcRenderer.invoke('smartsub-preferences:save',...args),
   smartsubState:(...args:unknown[])=>ipcRenderer.invoke('smartsub:state',...args),
   smartsubChoose:(...args:unknown[])=>ipcRenderer.invoke('smartsub:choose',...args),
   smartsubOpenOfficial:(...args:unknown[])=>ipcRenderer.invoke('smartsub:openOfficial',...args),

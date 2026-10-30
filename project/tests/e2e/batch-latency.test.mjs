@@ -54,6 +54,6 @@ test('duplicate files reuse one request with live progress, independent saves an
   await panel.getByRole('button',{name:'检查所选文件'}).click();await panel.getByRole('button',{name:'确认发送并开始'}).click();
   await panel.getByText(/等待服务响应 ·/).first().waitFor();writeFileSync(join(sources,'c.txt'),'external change');
   await panel.locator('.batch-item.failed').filter({hasText:'c.txt'}).waitFor();
-  await page.waitForFunction(async()=> (await window.clipnote.batchState()).value.status==='done');
+  await panel.locator('.batch-item.succeeded').filter({hasText:'d.txt'}).waitFor();
   assert.equal(calls,5);assert.match(readFileSync(join(notes,'c.md'),'utf8'),/测试内容/);
 });

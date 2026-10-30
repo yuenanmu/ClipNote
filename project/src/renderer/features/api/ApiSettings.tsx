@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import type { ApiState } from '../../../contracts/api.ts';
 import './api.css';
 
-export function ApiSettings({ onBack }: { onBack(): void }) {
+export function ApiSettings({ onBack, embedded=false }: { onBack(): void; embedded?:boolean }) {
   const [saved, setSaved] = useState<ApiState>({ configured: false });
   const [baseUrl, setBaseUrl] = useState(''); const [model, setModel] = useState(''); const [apiKey, setApiKey] = useState('');
   const [contextWindow, setContextWindow] = useState(8192); const [maxTokens, setMaxTokens] = useState(2048);
@@ -17,7 +17,7 @@ export function ApiSettings({ onBack }: { onBack(): void }) {
   const testConnection = async () => { if (busy || changed) return; setBusy(true); setTesting(true); setNotice(undefined); try { const result = await window.clipnote.apiTest(); setNotice(result.status === 'ok' ? { text: '连接测试通过' } : { text: result.error.message, error: true }); } catch { setNotice({ text: '连接测试失败，请重试。', error: true }); } finally { setBusy(false); setTesting(false); } };
   const fetchModels = async () => { if (busy) return; setBusy(true); setTesting(true); setListing(true); setNotice(undefined); setModels([]); setModelsFor(''); try { const result = await window.clipnote.apiModels({ baseUrl, apiKey }); if (result.status === 'error') { setNotice({ text: result.error.message, error: true }); return; } setModels(result.value); setModelsFor(baseUrl); setNotice({ text: result.value.length ? `已获取 ${result.value.length} 个模型，请选择。` : '服务未返回模型，请手动填写。' }); } catch { setNotice({ text: '获取模型失败，请检查服务地址和网络。', error: true }); } finally { setBusy(false); setTesting(false); setListing(false); } };
   const wrongDeepSeek = /^https:\/\/platform\.deepseek\.com\/?$/i.test(baseUrl.trim());
-  return <div className="reader-shell"><aside className="reader-outline"><div className="reader-brand">ClipNote<span>服务与模型</span></div><button className="reader-back" aria-label="返回文件工作台" disabled={busy} onClick={onBack}>← 返回文件工作台</button><div className="api-sidebar-current">API 设置</div><p className="reader-offline">本地保存 · 主动连接</p></aside><main className="api-settings"><header><div><p className="eyebrow">工作台 / 服务设置</p><h1>API 设置</h1><p>配置 OpenAI 兼容服务，用于后续整理资料。</p></div></header>
+  return <div className={embedded?"api-embedded":"reader-shell"}>{!embedded && <aside className="reader-outline"><div className="reader-brand">ClipNote<span>服务与模型</span></div><button className="reader-back" aria-label="返回文件工作台" disabled={busy} onClick={onBack}>← 返回文件工作台</button><div className="api-sidebar-current">API 设置</div><p className="reader-offline">本地保存 · 主动连接</p></aside>}<main className="api-settings"><header><div><p className="eyebrow">工作台 / 服务设置</p><h1>API 设置</h1><p>配置 OpenAI 兼容服务，用于后续整理资料。</p></div></header>
     <div className="api-panel"><h2>服务与模型</h2><p>密钥由系统加密保存在本机。更改服务地址时，请重新输入该服务的密钥。</p>
       <label>服务地址<input aria-label="服务地址" value={baseUrl} onChange={e => changeBaseUrl(e.target.value)} placeholder="https://服务地址/v1" disabled={busy} /></label>
       {wrongDeepSeek && <p className="api-address-hint">这是 DeepSeek 平台网站地址。API 地址请使用 https://api.deepseek.com；更换地址后请重新输入密钥。 <button type="button" onClick={() => changeBaseUrl('https://api.deepseek.com')} disabled={busy}>使用 API 地址</button></p>}

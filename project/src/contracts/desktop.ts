@@ -6,13 +6,15 @@ import type { NoteEntry, ReaderDocument } from './reader.ts';
 import type { ReaderErrorCode } from '../modules/reader/errors.ts';
 import type { ApiConfigInput, ApiResult, ApiState } from './api.ts';
 import type { WorkflowResult } from './workflow.ts';
-import type {SmartSubDiscovery,SmartSubTaskView,SmartSubSource,SmartSubReadiness,SmartSubTranscriptionReadiness} from './smartsub.ts';
+import type {SmartSubPreferencesView,SmartSubSelection,SmartSubDiscovery,SmartSubTaskView,SmartSubSource,SmartSubReadiness,SmartSubTranscriptionReadiness} from './smartsub.ts';
 import type {WorkspaceKind,WorkspaceActions,WorkspaceAction,WorkspaceResult,WorkspaceChange,BatchConfig,BatchState,SavedResult,SavePreview,ExportPreview,ExportSelection,FileOperationResult} from './workspace.ts';
 export type ReaderResult<T> = { status: 'ok'; value: T } | { status: 'cancelled' } | { status: 'error'; error: { code: ReaderErrorCode; message: string } };
 export type ImportErrorCode = SourceErrorCode | 'IMPORT_BUSY' | 'FORBIDDEN_REQUEST' | 'IMPORT_FAILED';
 export type ImportResult = { status: 'imported'; document: SourceDocument; entryId?:string } | { status: 'cancelled' } | { status: 'error'; error: { code: ImportErrorCode; message: string } };
 export type StorageResult<T> = { status: 'ok'; value: T } | { status: 'cancelled' } | { status: 'error'; error: { code: StorageErrorCode | 'FORBIDDEN_REQUEST' | 'STORAGE_BUSY'; message: string; draftId?: string } };
 export interface DesktopApi {
+  smartsubPreferences():Promise<WorkspaceResult<SmartSubPreferencesView>>;
+  smartsubSavePreferences(selection:SmartSubSelection):Promise<WorkspaceResult<SmartSubSelection>>;
   smartsubState():Promise<WorkspaceResult<SmartSubDiscovery>>;
   smartsubChoose():Promise<WorkspaceResult<SmartSubDiscovery>>;
   smartsubOpenOfficial():Promise<WorkspaceResult<null>>;

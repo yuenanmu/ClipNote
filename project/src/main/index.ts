@@ -14,6 +14,8 @@ import { createSmartSubTaskHandlers } from './smartsub-task-controller.ts';
 import { findSmartSub,invokeSmartSub } from '../modules/smartsub/cli.ts';
 import { SmartSubTasks } from '../modules/smartsub/tasks.ts';
 import { inspectSmartSub } from '../modules/smartsub/readiness.ts';
+import {SmartSubPreferences} from '../modules/smartsub/preferences.ts';
+import {createSmartSubPreferencesHandlers} from './smartsub-preferences-controller.ts';
 import { TranscriptionTasks } from '../modules/smartsub/transcription-tasks.ts';
 import { BatchReuse } from '../modules/api/batch-reuse.ts';
 import { WorkspaceFiles } from '../modules/workspace/files.ts';
@@ -146,7 +148,10 @@ app.whenReady().then(() => {
   const identityFor=async(install:Awaited<ReturnType<typeof smartsubInstallation>>)=>{const value=await invokeSmartSub(install,'system.info',{});if(!value || typeof value!=='object' || typeof (value as any).profile!=='string' || !(value as any).profile)throw new Error('无法确认 SmartSub 后台身份。');return digest(JSON.stringify([install.root.toLowerCase(),resolve((value as any).profile).toLowerCase()]));};
   const smartsubInvoke=async(operation:string,input:unknown,binding?:string)=>{const install=await smartsubInstallation();if(binding && binding!==await identityFor(install))throw new Error('SmartSub 安装或后台身份已变化，请切回原安装后恢复。');return invokeSmartSub(install,operation,input);};
   const smartsubTasks=new SmartSubTasks(join(local,'smartsub'),smartsubInvoke,async()=>identityFor(await smartsubInstallation()));
-  const transcriptions=new TranscriptionTasks(join(local,'smartsub'),smartsubInvoke,id=>smartsubTasks.downloadReceipt(id),id=>smartsubTasks.cacheDirectory(id),(id,operation,input)=>smartsubTasks.invokeFor(id,operation,input));
+  const smartsubPreferences=new SmartSubPreferences(join(local,'smartsub','transcription-settings.json'),smartsubInvoke);
+  const preferenceHandlers=createSmartSubPreferencesHandlers(trusted,smartsubPreferences);
+  for(const [action,handler] of Object.entries(preferenceHandlers))ipcMain.handle(`smartsub-preferences:${action}`,handler);
+  const transcriptions=new TranscriptionTasks(join(local,'smartsub'),smartsubInvoke,id=>smartsubTasks.downloadReceipt(id),id=>smartsubTasks.cacheDirectory(id),(id,operation,input)=>smartsubTasks.invokeFor(id,operation,input),()=>smartsubPreferences.selection());
   const smartsubTaskHandlers=createSmartSubTaskHandlers({isTrustedSender:trusted,
     readiness:()=>inspectSmartSub(smartsubInvoke),
     prepare:async url=>({requestId:(await smartsubTasks.prepare(url)).requestId}),submit:async(id,url)=>{const ready=await inspectSmartSub(smartsubInvoke);if(!ready.compatible)throw new Error('当前 SmartSub 版本缺少所需任务接口。');if(!ready.downloaders.length)throw new Error('缺少视频下载组件，请在 SmartSub 中安装后重试。');return smartsubTasks.submit(id,url);},
@@ -252,6 +257,7 @@ app.whenReady().then(() => {
   for (const [action, handler] of Object.entries(apiHandlers)) ipcMain.handle(`api:${action}`, handler);
   window.once('ready-to-show', () => window.show());
   window.on('closed', () => {
+    for(const action of ['state','save'])ipcMain.removeHandler(`smartsub-preferences:${action}`);
     for(const action of ['state','choose','openOfficial'])ipcMain.removeHandler(`smartsub:${action}`);
     for(const action of Object.keys(smartsubTaskHandlers))ipcMain.removeHandler(`smartsub-task:${action}`);
     stopWatching();

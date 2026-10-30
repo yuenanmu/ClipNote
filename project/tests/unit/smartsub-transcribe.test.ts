@@ -11,6 +11,12 @@ test('checks configured local engine and model before transcribing',async()=>{
   const calls:string[]=[];const result=await inspectTranscription(async op=>{calls.push(op);if(op==='settings.get')return {defaults:{transcriptionEngine:'builtin',model:'small'}};if(op==='engines.list')return {builtin:{state:'ready'}};return {modelsInstalled:['small']};});
   assert.deepEqual(result,{ready:true,engine:'builtin',model:'small'});assert.deepEqual(calls,['settings.get','engines.list','models.list']);
 });
+
+test('ClipNote selection takes precedence over SmartSub defaults and still requires installed resources',async()=>{
+  const invoke=async(op:string)=>op==='settings.get'?{defaults:{transcriptionEngine:'builtin',model:'small'}}:op==='engines.list'?{builtin:{state:'ready'}}:{modelsInstalled:['small','medium']};
+  assert.deepEqual(await inspectTranscription(invoke,{engine:'builtin',model:'medium'}),{ready:true,engine:'builtin',model:'medium'});
+  assert.equal((await inspectTranscription(invoke,{engine:'builtin',model:'missing'})).ready,false);
+});
 test('only transcribes a task-owned media after consent and resumes the same request',async t=>{
   const root=await mkdtemp(join(tmpdir(),'clipnote-transcribe-'));t.after(()=>rm(root,{recursive:true,force:true}));const parent=randomUUID(),video=join(root,'sample.mp4');await writeFile(video,'synthetic');
   let count=0;const invoke=async(op:string,input:any):Promise<any>=>{if(op==='settings.get')return {defaults:{transcriptionEngine:'builtin',model:'small'}};if(op==='engines.list')return {builtin:{state:'ready'}};if(op==='models.list')return {modelsInstalled:['small']};if(op==='transcribe'){count++;assert.deepEqual(input.files,[video]);assert.equal(input.engine,'builtin');return {id:'transcription-job',status:'running'};}if(op==='tasks.get')return {id:'transcription-job',status:'running'};throw Error('unexpected');};
@@ -40,4 +46,16 @@ test('a lost retry receipt resumes the new request without creating another one'
   const invoke=async(op:string,input:any):Promise<any>=>{if(op==='settings.get')return {defaults:{transcriptionEngine:'builtin',model:'small'}};if(op==='engines.list')return {builtin:{state:'ready'}};if(op==='models.list')return {modelsInstalled:['small']};if(op==='transcribe'){ids.push(input.requestId);if(ids.length===2)throw Error('connection lost');return {id:'job-'+ids.length,status:'running'};}if(op==='tasks.get')return {id:input.id,status:'failed'};throw Error('unexpected');};
   const tasks=new TranscriptionTasks(root,invoke,async()=>({id:'download',status:'completed',subtitlePaths:[],mediaPaths:[video],hasSubtitles:false}));
   await tasks.submit(parent,'builtin','small');await tasks.refresh(parent);await assert.rejects(tasks.retry(parent,'builtin','small'));await tasks.submit(parent,'builtin','small');assert.equal(ids.length,3);assert.equal(ids[1],ids[2]);assert.notEqual(ids[0],ids[1]);
+});
+
+test('cancelling a transcription does not wait behind a slow status query and late running replies cannot undo cancellation',async t=>{
+  const root=await mkdtemp(join(tmpdir(),'clipnote-cancel-'));t.after(()=>rm(root,{recursive:true,force:true}));const parent=randomUUID(),video=join(root,'sample.mp4');await writeFile(video,'synthetic');
+  let release!:(value:unknown)=>void,entered!:()=>void,cancelled=false;const started=new Promise<void>(resolve=>{entered=resolve;});
+  const invoke=async(op:string):Promise<any>=>{if(op==='settings.get')return {defaults:{transcriptionEngine:'builtin',model:'small'}};if(op==='engines.list')return {builtin:{state:'ready'}};if(op==='models.list')return {modelsInstalled:['small']};if(op==='transcribe')return {id:'transcript',status:'running'};if(op==='tasks.get'){entered();return new Promise(resolve=>{release=resolve;});}if(op==='tasks.cancel'){cancelled=true;return {id:'transcript',status:'cancelled'};}throw Error('unexpected');};
+  const tasks=new TranscriptionTasks(root,invoke,async()=>({id:'download',status:'completed',subtitlePaths:[],mediaPaths:[video],hasSubtitles:false}));
+  await tasks.submit(parent,'builtin','small');const refresh=tasks.refresh(parent);await started;const cancel=tasks.cancel(parent);
+  // Bound the assertion while always releasing the held query, including on failure.
+  try{await Promise.race([cancel,new Promise(resolve=>setTimeout(resolve,150))]);assert.equal(cancelled,true,'cancel reaches the CLI while tasks.get is held');}
+  finally{release({id:'transcript',status:'running'});await Promise.allSettled([refresh,cancel]);}
+  assert.equal((await refresh).status,'cancelled');assert.equal((await cancel).status,'cancelled');
 });
