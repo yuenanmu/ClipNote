@@ -146,8 +146,9 @@ app.whenReady().then(() => {
     return install;
   };
   const identityFor=async(install:Awaited<ReturnType<typeof smartsubInstallation>>)=>{const value=await invokeSmartSub(install,'system.info',{});if(!value || typeof value!=='object' || typeof (value as any).profile!=='string' || !(value as any).profile)throw new Error('无法确认 SmartSub 后台身份。');return digest(JSON.stringify([install.root.toLowerCase(),resolve((value as any).profile).toLowerCase()]));};
-  const smartsubInvoke=async(operation:string,input:unknown,binding?:string)=>{const install=await smartsubInstallation();if(binding && binding!==await identityFor(install))throw new Error('SmartSub 安装或后台身份已变化，请切回原安装后恢复。');return invokeSmartSub(install,operation,input);};
-  const smartsubTasks=new SmartSubTasks(join(local,'smartsub'),smartsubInvoke,async()=>identityFor(await smartsubInstallation()));
+  const smartsubInvoke=async(operation:string,input:unknown)=>invokeSmartSub(await smartsubInstallation(),operation,input);
+  const smartsubConnection=async()=>{const install=await smartsubInstallation();return {identity:await identityFor(install),invoke:(operation:string,input:unknown)=>invokeSmartSub(install,operation,input)};};
+  const smartsubTasks=new SmartSubTasks(join(local,'smartsub'),smartsubInvoke,smartsubConnection);
   const smartsubPreferences=new SmartSubPreferences(join(local,'smartsub','transcription-settings.json'),smartsubInvoke);
   const preferenceHandlers=createSmartSubPreferencesHandlers(trusted,smartsubPreferences);
   for(const [action,handler] of Object.entries(preferenceHandlers))ipcMain.handle(`smartsub-preferences:${action}`,handler);

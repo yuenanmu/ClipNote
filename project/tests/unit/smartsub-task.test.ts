@@ -35,9 +35,19 @@ test('an unknown submission outcome is retried with the original request identit
 });
 test('refuses recovery and cancellation against a different SmartSub installation or profile',async t=>{
   const root=await mkdtemp(join(tmpdir(),'clipnote-binding-'));t.after(()=>rm(root,{recursive:true,force:true}));let identity='a'.repeat(64),calls=0;
-  const service=new SmartSubTasks(root,async()=>{calls++;return {id:'job',status:'running'};},async()=>identity);
+  const invoke=async()=>{calls++;return {id:'job',status:'running'};};
+  const service=new SmartSubTasks(root,invoke,async()=>({identity,invoke}));
   const prepared=await service.prepare('https://example.com/video');identity='b'.repeat(64);
   await assert.rejects(service.submit(prepared.requestId,'https://example.com/video'),/SmartSub.*变化/);assert.equal(calls,0);
   identity='a'.repeat(64);await service.submit(prepared.requestId,'https://example.com/video');identity='b'.repeat(64);
   await assert.rejects(service.refresh(prepared.requestId),/SmartSub.*变化/);await assert.rejects(service.cancel(prepared.requestId),/SmartSub.*变化/);assert.equal(calls,1);
+});
+
+test('each bound operation checks one captured connection and never falls back to an unbound installation',async t=>{
+  const root=await mkdtemp(join(tmpdir(),'clipnote-connection-'));t.after(()=>rm(root,{recursive:true,force:true}));let checks=0,selected='A';const called:string[]=[];
+  const service=new SmartSubTasks(root,async()=>{throw Error('unbound invocation');},async()=>{checks++;const target=selected;return {identity:target==='A'?'a'.repeat(64):'b'.repeat(64),invoke:async(op:string)=>{called.push(target+':'+op);selected='B';return {id:'job',status:'running'};}};});
+  const prepared=await service.prepare('https://example.com/video');assert.equal(checks,1);
+  await service.submit(prepared.requestId,'https://example.com/video');assert.equal(checks,2);assert.deepEqual(called,['A:downloads.start']);
+  await assert.rejects(service.refresh(prepared.requestId),/身份已变化/);assert.equal(checks,3);assert.equal(called.length,1);
+  selected='A';await service.refresh(prepared.requestId);assert.equal(checks,4);assert.deepEqual(called,['A:downloads.start','A:tasks.get']);
 });
