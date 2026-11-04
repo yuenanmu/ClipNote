@@ -16,11 +16,11 @@ test('video link uses the task bridge and opens the obtained synthetic subtitle'
     else if(op==='downloads.start'){const noSub=a.config.entries[0].url.endsWith('no-sub');const p=path.join(a.config.savePath,noSub?'合成视频.mp4':'合成字幕.srt');fs.writeFileSync(p,noSub?'synthetic':'1\\n00:00:01,000 --> 00:00:02,000\\n合成视频字幕\\n');fs.writeFileSync(state,JSON.stringify({p,noSub}));v={id:'fixture-task',status:'running'};}
     else if(op==='tasks.cancel'){fs.writeFileSync(state,JSON.stringify({...JSON.parse(fs.readFileSync(state)),cancelled:true}));fs.unlinkSync(path.join(__dirname,'hold-transcription'));v={id:a.id,status:'cancelled'};}
     else if(op==='tasks.get' && a.id==='fixture-transcribe' && fs.existsSync(path.join(__dirname,'hold-transcription'))){fs.writeFileSync(path.join(__dirname,'query-started'),'yes');setTimeout(()=>process.stdout.write(JSON.stringify({id:a.id,status:'running'})),2000);return;}
-    else if(op==='tasks.get'){const {p,noSub,transcript,cancelled}=JSON.parse(fs.readFileSync(state));v=a.id==='fixture-transcribe'?{id:a.id,status:cancelled?'cancelled':'completed',artifacts:[{kind:'srt',path:transcript}]}:{id:'fixture-task',status:'completed',result:noSub?{artifacts:[{kind:'video',path:p}]}:{downloadEntries:[{subtitlePaths:[p]}]}};}
+    else if(op==='tasks.get'){const {p,noSub,transcript,cancelled}=JSON.parse(fs.readFileSync(state));v=a.id==='fixture-transcribe'?{id:a.id,status:cancelled?'cancelled':'completed',artifacts:[{kind:'txt',path:transcript},{kind:'srt',path:path.join(__dirname,'private-intermediate.srt')}]}:{id:'fixture-task',status:'completed',result:noSub?{artifacts:[{kind:'video',path:p}]}:{downloadEntries:[{subtitlePaths:[p]}]}};}
     else if(op==='settings.get')v={defaults:{transcriptionEngine:'builtin',model:'small'}};
     else if(op==='engines.list')v={builtin:{state:'ready'}};
     else if(op==='models.list')v={modelsInstalled:['small','medium']};
-    else if(op==='transcribe'){fs.mkdirSync(a.outputDir,{recursive:true});const p=path.join(a.outputDir,'转写字幕.srt');fs.writeFileSync(p,'1\\n00:00:01,000 --> 00:00:02,000\\n合成视频字幕\\n');fs.writeFileSync(state,JSON.stringify({...JSON.parse(fs.readFileSync(state)),transcript:p,cancelled:false}));v={id:'fixture-transcribe',status:'running'};}
+    else if(op==='transcribe'){fs.mkdirSync(a.outputDir,{recursive:true});const p=path.join(a.outputDir,'转写字幕.txt');fs.writeFileSync(p,'合成视频字幕');fs.writeFileSync(state,JSON.stringify({...JSON.parse(fs.readFileSync(state)),transcript:p,cancelled:false}));v={id:'fixture-transcribe',status:'running'};}
     else if(op==='subtitles.read')v={filePath:a.filePath,version:'v1',format:'srt',total:1,offset:0,cues:[{startMs:1000,endMs:2000,text:'合成视频字幕'}]};
     else throw Error('unexpected '+op);process.stdout.write(JSON.stringify(v));});`);
   const env={...process.env,CLIPNOTE_TEST_USER_DATA:profile,CLIPNOTE_TEST_SMARTSUB_ROOT:install};delete env.ELECTRON_RUN_AS_NODE;
@@ -47,7 +47,7 @@ test('video link uses the task bridge and opens the obtained synthetic subtitle'
   await page.getByText('没有找到可用字幕',{exact:false}).waitFor();
   await page.getByText('本地引擎：builtin；模型：medium',{exact:false}).waitFor();
   await page.getByRole('button',{name:'确认并开始或恢复转写'}).click();
-  await page.getByText('转写：转写完成').waitFor();await page.getByRole('button',{name:'使用转写字幕 1'}).click();await page.getByText('合成视频字幕').first().waitFor();
+  await page.getByText('转写：转写完成').waitFor();await page.reload();await page.getByRole('button',{name:'视频链接',exact:true}).click();await page.getByText('转写：转写完成').waitFor();await page.getByRole('button',{name:'使用转写字幕 1'}).click();await page.getByText('合成视频字幕').first().waitFor();
   await page.getByRole('button',{name:'视频链接',exact:true}).click();await page.getByLabel('视频链接').fill('https://example.invalid/no-sub');await page.getByRole('button',{name:'确认并开始获取字幕'}).click();
   await page.getByText('本地引擎：builtin；模型：medium',{exact:false}).waitFor();writeFileSync(join(dirname(cli),'hold-transcription'),'synthetic');
   await page.getByRole('button',{name:'确认并开始或恢复转写'}).click();await page.getByText('转写：正在转写',{exact:true}).waitFor();

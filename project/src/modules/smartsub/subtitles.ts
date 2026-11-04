@@ -8,6 +8,9 @@ export async function loadSmartSubSubtitle(cacheRoot:string,path:string,read:(of
   const file=resolve(path), diff=relative(resolve(cacheRoot),file);
   if (!diff || isAbsolute(diff) || diff==='..' || diff.startsWith('..'+sep)) throw new Error('字幕路径不在任务目录中。');
   const bytes=await readBytes(file,MAX_FILE_BYTES), document=parseSource(bytes,file);
+  // Plain-text exports have no cue timeline. Read them through the same bounded,
+  // symlink-rejecting source parser used by ordinary TXT imports.
+  if(document.format==='txt')return {document,bytes};
   let offset=0, version:unknown, total:number|undefined;
   while (total===undefined || offset<total) {
     const raw=await read(offset,500);

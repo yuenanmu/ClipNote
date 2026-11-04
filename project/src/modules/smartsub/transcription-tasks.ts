@@ -36,12 +36,12 @@ export class TranscriptionTasks {
     const record:RecordData=existing??{version:1,requestId,fingerprint,status:'prepared'};if(!existing)await writeAtomic(path,record);
     if(record.taskId)return this.query(id,record,'tasks.get');
     const raw=await this.call(id,'transcribe',input);if(!raw || typeof raw!=='object' || Array.isArray(raw))throw new Error('转写回执无效。');
-    const taskId=(raw as any).id;makeTaskRequest(taskId);const receipt=parseTaskReceipt(raw,taskId,this.cache(id));record.taskId=taskId;record.status=receipt.status;await writeAtomic(path,record);return this.view(id,receipt);
+    const taskId=(raw as any).id;makeTaskRequest(taskId);const receipt=parseTaskReceipt(raw,taskId,this.cache(id),true);record.taskId=taskId;record.status=receipt.status;await writeAtomic(path,record);return this.view(id,receipt);
   }
   private view(id:string,receipt:Receipt){return {requestId:id,status:receipt.status,subtitleCount:receipt.subtitlePaths.length,hasSubtitles:receipt.hasSubtitles};}
   private async query(id:string,record:RecordData,op:'tasks.get'|'tasks.cancel'){
     if(!record.taskId)throw new Error('转写尚未提交，请重新确认资源后恢复。');
-    const receipt=parseTaskReceipt(await this.call(id,op,makeTaskRequest(record.taskId)),record.taskId,this.cache(id));
+    const receipt=parseTaskReceipt(await this.call(id,op,makeTaskRequest(record.taskId)),record.taskId,this.cache(id),true);
     return this.commit(async()=>{
       const current=await this.record(id);
       if(current.requestId!==record.requestId || current.taskId!==record.taskId)throw new Error('转写任务已更新，请重新查询。');
@@ -53,5 +53,5 @@ export class TranscriptionTasks {
   }
   async refresh(id:string){return this.query(id,await this.record(id),'tasks.get');}
   async cancel(id:string){return this.query(id,await this.record(id),'tasks.cancel');}
-  async subtitle(id:string,index:number){if(!Number.isSafeInteger(index) || index<0 || index>999)throw new Error('字幕选择无效。');const record=await this.record(id);if(!record.taskId)throw new Error('转写尚未完成。');const receipt=parseTaskReceipt(await this.call(id,'tasks.get',makeTaskRequest(record.taskId)),record.taskId,this.cache(id));if(receipt.status!=='completed' || !receipt.subtitlePaths[index])throw new Error('字幕尚不可用。');const path=receipt.subtitlePaths[index];return loadSmartSubSubtitle(this.cache(id),path,(offset,limit)=>this.call(id,'subtitles.read',makeSubtitleReadRequest(path,offset,limit)));}
+  async subtitle(id:string,index:number){if(!Number.isSafeInteger(index) || index<0 || index>999)throw new Error('字幕选择无效。');const record=await this.record(id);if(!record.taskId)throw new Error('转写尚未完成。');const receipt=parseTaskReceipt(await this.call(id,'tasks.get',makeTaskRequest(record.taskId)),record.taskId,this.cache(id),true);if(receipt.status!=='completed' || !receipt.subtitlePaths[index])throw new Error('字幕尚不可用。');const path=receipt.subtitlePaths[index];return loadSmartSubSubtitle(this.cache(id),path,(offset,limit)=>this.call(id,'subtitles.read',makeSubtitleReadRequest(path,offset,limit)));}
 }

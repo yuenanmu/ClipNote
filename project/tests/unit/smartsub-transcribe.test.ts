@@ -59,3 +59,16 @@ test('cancelling a transcription does not wait behind a slow status query and la
   finally{release({id:'transcript',status:'running'});await Promise.allSettled([refresh,cancel]);}
   assert.equal((await refresh).status,'cancelled');assert.equal((await cancel).status,'cancelled');
 });
+
+
+test('completed transcription recovers task-owned TXT despite external intermediate SRT without resubmitting',async t=>{
+  const root=await mkdtemp(join(tmpdir(),'clipnote-export-'));t.after(()=>rm(root,{recursive:true,force:true}));
+  const parent=randomUUID(),video=join(root,'sample.mp4'),txt=join(root,'result.txt');await writeFile(video,'synthetic');await writeFile(txt,'合成转写结果。');let submissions=0,externalOnly=false;
+  const invoke=async(op:string):Promise<any>=>{if(op==='settings.get')return {defaults:{transcriptionEngine:'builtin',model:'small'}};if(op==='engines.list')return {builtin:{state:'ready'}};if(op==='models.list')return {modelsInstalled:['small']};if(op==='transcribe'){submissions++;return {id:'job',status:'queued'};}if(op==='tasks.get')return {id:'job',status:'completed',artifacts:[{kind:'srt',path:join(tmpdir(),'external-private.srt')},...(externalOnly?[]:[{kind:'txt',path:txt}])]};throw Error('unexpected read of external or text subtitle via CLI');};
+  const source=async()=>({id:'download',status:'completed' as const,subtitlePaths:[],mediaPaths:[video],hasSubtitles:false});
+  await new TranscriptionTasks(root,invoke,source).submit(parent,'builtin','small');
+  const resumed=new TranscriptionTasks(root,invoke,source);const result=await resumed.refresh(parent);
+  assert.equal(result.status,'completed');assert.equal(result.subtitleCount,1);
+  const snapshot=await resumed.subtitle(parent,0);assert.equal(snapshot.document.format,'txt');assert.equal(snapshot.bytes.toString(),'合成转写结果。');assert.equal(submissions,1);
+  externalOnly=true;assert.equal((await resumed.refresh(parent)).subtitleCount,0);await assert.rejects(resumed.subtitle(parent,0),/字幕尚不可用/);
+});
