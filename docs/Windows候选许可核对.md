@@ -16,3 +16,4 @@
 - `standardwebhooks@1.1.1` 由 pi-ai 的 `@anthropic-ai/sdk` 引入；`proxy-agent-negotiate@1.1.0` 由 pi-ai 的 HTTP/HTTPS 代理依赖引入；AWS 包由 pi-ai 的 Bedrock 依赖树引入；`data-uri-to-buffer@4.0.1` 经 Google 认证依赖引入；`format@0.2.2` 经 Markdown 解析依赖引入。
 - 对内部候选 aIJzoa 按 package.json 比对复制后的包路径和 npm 生产依赖路径，未发现额外包目录；该检查不代表每个许可证文件完整，也不等于法律结论。
 - 固定版本 proxy-agent-negotiate 上游 package.json 声明 MIT（https://github.com/TooTallNate/proxy-agents/blob/proxy-agent-negotiate%401.1.0/packages/negotiate/package.json），该版本目录未找到独立许可文件；版权和完整声明仍待确认。
+- `format@0.2.2` 的随包 `format.js` 自带 Sami Samhuri 2010–2013 版权声明及 MIT 标识；上游当前许可全文为 https://github.com/samsonjs/format/blob/main/License.md ，版权年份为 2010–2026。该当前版本原文留存于 `project/licenses/format-upstream-MIT.md` 并随候选附带；尚未定位 0.2.2 发布时的许可原文，不能仅凭此项宣布分发审核完成。
