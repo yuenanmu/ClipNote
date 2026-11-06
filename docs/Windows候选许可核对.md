@@ -5,7 +5,7 @@
 - Electron：候选运行目录含上游 LICENSE 和 LICENSES.chromium.html。
 - `@earendil-works/pi-ai` 与 `@earendil-works/pi-telemetry` 1.4.0：包元数据声明 MIT，包内未见独立许可证；上游相同版本仓库根目录有 MIT 许可，见 https://github.com/earendil-works/pi/blob/v1.4.0/LICENSE 。已在 `project/licenses/pi-1.4.0-MIT.txt` 留存原文，组装脚本会附入候选；适用范围仍需完整核对。
 - `standardwebhooks` 1.1.1：包元数据声明 MIT，独立许可证缺失；上游仓库当前根许可证与包声明不一致，须定位对应发布版本及子目录许可，暂不认定完整。
-- `proxy-agent-negotiate` 1.1.0、`format` 0.2.2、`data-uri-to-buffer` 4.0.1：元数据声明 MIT（format 使用旧字段），未发现独立许可证，须核对对应版本及版权声明。
+- `proxy-agent-negotiate` 1.1.0、`format` 0.2.2：元数据声明 MIT（format 使用旧字段），未发现独立许可证，仍须核对相应声明。`data-uri-to-buffer` 4.0.1 虽无独立许可证文件，但其随包 README 包含版权和完整许可，见下方版本核对。
 - `@aws-sdk/credential-provider-http` 3.972.78、`@aws-sdk/nested-clients` 3.997.50、`@aws-sdk/credential-provider-login` 3.972.83：元数据声明 Apache-2.0；已从随包 AWS SDK 依赖保留 Apache 2.0 全文并纳入组装，但仍须核对这三个具体版本的版权和 NOTICE。
 - 其余包存在可识别许可或 NOTICE 文件，但仍需确认实际分发内容与声明覆盖范围；依赖清单不是完整法律审核。
 
@@ -17,3 +17,5 @@
 - 对内部候选 aIJzoa 按 package.json 比对复制后的包路径和 npm 生产依赖路径，未发现额外包目录；该检查不代表每个许可证文件完整，也不等于法律结论。
 - 固定版本 proxy-agent-negotiate 上游 package.json 声明 MIT（https://github.com/TooTallNate/proxy-agents/blob/proxy-agent-negotiate%401.1.0/packages/negotiate/package.json），该版本目录未找到独立许可文件；版权和完整声明仍待确认。
 - `format@0.2.2` 的随包 `format.js` 自带 Sami Samhuri 2010–2013 版权声明及 MIT 标识；上游当前许可全文为 https://github.com/samsonjs/format/blob/main/License.md ，版权年份为 2010–2026。该当前版本原文留存于 `project/licenses/format-upstream-MIT.md` 并随候选附带；尚未定位 0.2.2 发布时的许可原文，不能仅凭此项宣布分发审核完成。
+- `data-uri-to-buffer@4.0.1`：上游固定版本 README（https://github.com/TooTallNate/node-data-uri-to-buffer/blob/4.0.1/README.md）含 Nathan Rajlich 2014 版权声明及 MIT 全文；本地包中 README 的 Git blob 摘要为 `d0f2e05973586a9e863337877138fe0a600cd2ee`，与上游文件一致，候选 VwYfqn 对应 README 的 SHA-256 也与本地包一致。`unresolved-notices.json` 只按独立文件名检测，仍会列出该包，不表示 README 中没有许可。
+- `format@0.2.2` 上游固定版本 README（https://github.com/samsonjs/format/blob/0.2.2/Readme.md）载有 2010–2014 年版权声明和 MIT 链接；同版本源码载 2010–2013 年声明。该历史版本目录未见独立许可全文，当前上游全文已附带，历史链接内容仍未直接核实。
