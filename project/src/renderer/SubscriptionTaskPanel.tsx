@@ -1,0 +1,14 @@
+import {useEffect,useState} from 'react';
+import type {SubscriptionTaskState} from '../contracts/desktop.ts';
+import {unwrap} from './workspace-api.ts';
+export function SubscriptionTaskPanel({id,folder,instructions,onDone}:{id:string;folder:string;instructions:string;onDone():void}){
+ const [models,setModels]=useState<{slug:string;displayName:string}[]>([]),[model,setModel]=useState(''),[task,setTask]=useState<SubscriptionTaskState>({status:'idle'}),[busy,setBusy]=useState(false),[error,setError]=useState('');
+ const run=async(fn:()=>Promise<void>)=>{setBusy(true);setError('');try{await fn();}catch(e){setError(e instanceof Error?e.message:'操作未完成。');}finally{setBusy(false);}};
+ useEffect(()=>{void run(async()=>{const values=unwrap(await window.clipnote.subscriptionModels());setModels(values);setModel(values[0]?.slug??'');const previous=unwrap(await window.clipnote.subscriptionTaskState());setTask(previous.status==='ready'?unwrap(await window.clipnote.subscriptionTaskCancel()):previous);});},[]);
+ useEffect(()=>{if(task.status==='ready')void window.clipnote.subscriptionTaskCancel().then(result=>setTask(unwrap(result)));},[id,folder,instructions]);
+ useEffect(()=>{if(task.status!=='running')return;const timer=setInterval(()=>{void window.clipnote.subscriptionTaskState().then(result=>{const next=unwrap(result);setTask(next);if(next.status==='done')onDone();}).catch(()=>setError('无法读取整理状态。'));},500);return()=>clearInterval(timer);},[task.status]);
+ return <section aria-label="订阅整理"><label>订阅模型<select value={model} disabled={busy||task.status==='running'||task.status==='ready'} onChange={e=>setModel(e.target.value)}>{models.map(item=><option key={item.slug} value={item.slug}>{item.displayName}</option>)}</select></label>
+ {task.status!=='ready'&&task.status!=='running'&&<button className="primary" disabled={busy||!model} onClick={()=>void run(async()=>setTask(unwrap(await window.clipnote.subscriptionTaskPrepare(id,folder,model,instructions))))}>检查资料</button>}
+ {task.status==='ready'&&<div><p>将资料 {task.sourcePath} 发送到 ChatGPT 订阅，账户 {task.accountLabel ?? task.profileId}，模型 {task.model}。生成后需确认保存至 {task.outputPath}{task.overwrite?'（将覆盖已有笔记）':''}。</p><button className="primary" disabled={busy} onClick={()=>void run(async()=>setTask(unwrap(await window.clipnote.subscriptionTaskStart())))}>确认发送</button><button className="secondary" onClick={()=>void run(async()=>setTask(unwrap(await window.clipnote.subscriptionTaskCancel())))}>取消确认</button></div>}
+ {task.status==='running'&&<p>正在整理 <button className="secondary" onClick={()=>void window.clipnote.subscriptionTaskCancel()}>停止</button></p>}{task.status==='done'&&<p>整理完成，请在待保存结果中确认保存。</p>}{task.status==='failed'&&<p role="alert">{task.error}</p>}{error&&<p role="alert">{error}</p>}</section>;
+}

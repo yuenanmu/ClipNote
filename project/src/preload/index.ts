@@ -1,6 +1,15 @@
 import { contextBridge, ipcRenderer } from 'electron';
 import type { DesktopApi } from '../contracts/desktop.ts';
 const api: DesktopApi = {
+  subscriptionTaskState:()=>ipcRenderer.invoke('subscription-task:state'),
+  subscriptionTaskPrepare:(...args)=>ipcRenderer.invoke('subscription-task:prepare',...args),
+  subscriptionTaskStart:()=>ipcRenderer.invoke('subscription-task:start'),
+  subscriptionTaskCancel:()=>ipcRenderer.invoke('subscription-task:cancel'),
+  subscriptionState:()=>ipcRenderer.invoke('subscription:state'),
+  subscriptionSignIn:()=>ipcRenderer.invoke('subscription:signIn'),
+  subscriptionCancel:()=>ipcRenderer.invoke('subscription:cancel'),
+  subscriptionModels:()=>ipcRenderer.invoke('subscription:models'),
+  subscriptionDisconnect:()=>ipcRenderer.invoke('subscription:disconnect'),
   smartsubPreferences:(...args:unknown[])=>ipcRenderer.invoke('smartsub-preferences:state',...args),
   smartsubSavePreferences:(...args)=>ipcRenderer.invoke('smartsub-preferences:save',...args),
   smartsubState:(...args:unknown[])=>ipcRenderer.invoke('smartsub:state',...args),
