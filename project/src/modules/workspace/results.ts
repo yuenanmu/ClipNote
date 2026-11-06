@@ -30,8 +30,7 @@ export class NoteResults {
   async prepare(id:string,folderId?:string,name?:string):Promise<SavePreview>{
     const data=await this.read(id);let plan:OutputPlan;
     if(folderId) plan=await this.files.previewPath(data.plan.sourcePath,folderId,{relocate:true,...(name?{name}:{})});
-    else { const root=await this.files.root('notes');if(!root)throw new WorkspaceError('MISSING');
-      try {plan=await this.files.previewPath(data.plan.sourcePath,root.id);} catch(error){if(!await this.files.canRecoverPublication(data.plan,data.markdown))throw error;plan=data.plan;} }
+    else { plan=data.plan; }
     const token=randomUUID();this.confirmations.set(token,{id,plan});while(this.confirmations.size>100)this.confirmations.delete(this.confirmations.keys().next().value!);
     return {token,name:plan.name,path:plan.notePath,overwrite:plan.exists};
   }
