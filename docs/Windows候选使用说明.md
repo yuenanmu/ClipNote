@@ -1,5 +1,9 @@
 # ClipNote Windows 候选版使用说明
 
+## 系统要求
+
+本候选包含 Windows x64 运行时，目标为 64 位 Windows 10 或 Windows 11；尚未在其他电脑或 Windows on ARM 上验收。链接获取、服务登录和 AI 请求需要可用网络。SmartSub 的组件、模型及磁盘空间要求依其实际安装选择而定。
+
 ## 准备与启动
 
 将整个候选文件夹复制到本机可写位置，双击 `ClipNote.exe`。程序自带 Electron 运行时，无需另装 Node.js。请保留文件夹内的全部文件；这是未签名、尚未完成跨电脑验收的候选版。退出程序后删除候选文件夹即可移除程序；用户数据保留在当前 Windows 用户的 `%APPDATA%\ClipNote`，请先自行备份需要保留的数据。
