@@ -2,12 +2,13 @@ import {build as bundle} from 'esbuild';
 import {build as buildRenderer} from 'vite';
 import {mkdir,mkdtemp,writeFile} from 'node:fs/promises';
 import {dirname,join,resolve} from 'node:path';
-import {fileURLToPath} from 'node:url';
+import {fileURLToPath,pathToFileURL} from 'node:url';
 import {collectEmbeddedPackages} from './embedded-packages.mjs';
 import {createNoticeDraft} from './bundle-notice-draft.mjs';
 import {rendererAssetDependencies} from './renderer-asset-dependencies.mjs';
 
 const root=resolve(dirname(fileURLToPath(import.meta.url)),'..');
+export async function buildBundledExperiment() {
 const parent=resolve(root,'../.local/bundle-experiments');
 await mkdir(parent,{recursive:true});
 const output=await mkdtemp(join(parent,'experiment-'));
@@ -35,4 +36,9 @@ await buildRenderer({configFile:false,root:join(root,'src/renderer'),base:'./',b
 const packages=await collectEmbeddedPackages({projectRoot:root,files:[...sources.values()]});
 const notices=await createNoticeDraft({projectRoot:root,outputDir:join(output,'npm-notices'),packages});
 await writeFile(join(output,'内部实验-不可分发.txt'),'仅用于验证按需构建；缺少完整许可审查及真实环境验收，不可分发。\n');
-console.log(`Internal experiment: ${output}\nDependency notices: ${notices.length}`);
+return {output,noticeCount:notices.length};
+}
+if (process.argv[1] && pathToFileURL(resolve(process.argv[1])).href===import.meta.url) {
+  const result=await buildBundledExperiment();
+  console.log(`Internal experiment: ${result.output}\nDependency notices: ${result.noticeCount}`);
+}
