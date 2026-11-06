@@ -15,7 +15,7 @@ export function BatchPanel({ids,instructions,onBusy,openRequest=0}:{ids:string[]
   const reload=async()=>setResults(unwrap(await window.clipnote.savedResults()));
   const run=async(fn:()=>Promise<void>)=>{if(working)return;setWorking(true);setError('');try{await fn();}catch(e){setError(e instanceof Error?e.message:'操作未完成。');}finally{setWorking(false);}};
   useEffect(()=>{void run(async()=>{await reload();const value=unwrap(await window.clipnote.batchState());setBatch(value);onBusy(value.status==='running');});},[]);
-  const show=()=>void run(async()=>{setOpen(true);const root=await workspaceValue('notes','root');setTarget(root);setText(instructions);});
+  const show=()=>void run(async()=>{setOpen(true);await reload();const root=await workspaceValue('notes','root');setTarget(root);setText(instructions);});
   useEffect(()=>{if(openRequest)show();},[openRequest]);
   useEffect(()=>{if(batch.status!=='running')return;let alive=true;const timer=setInterval(()=>{void window.clipnote.batchState().then(async response=>{if(!alive)return;const value=unwrap(response);setBatch(value);if(value.status!=='running'){onBusy(false);await reload();}}).catch(()=>{if(alive)setError('无法读取整理状态，请稍后重试。');});},400);return()=>{alive=false;clearInterval(timer);};},[batch.status]);
   const prepare=()=>void run(async()=>{if(!target)return;if(ids.length>100)throw new Error('单批最多整理 100 份资料，请减少选择。');const config=await window.clipnote.apiState();if(config.status!=='ok' || !config.value.configured)throw new Error('请先在 API 设置中配置服务和模型。');setBatch(unwrap(await window.clipnote.batchPrepare(ids,target.id,{baseUrl:config.value.baseUrl,model:config.value.model,instructions:text})));});
