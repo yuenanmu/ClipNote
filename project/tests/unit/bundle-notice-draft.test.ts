@@ -56,3 +56,32 @@ test('format supplemental notices include the fixed-version readme and current l
   const texts=await Promise.all(rows[0].files.map(file=>readFile(join(out,file),'utf8')));
   assert.deepEqual(texts.sort(),['current license','version notice']);
 });
+
+test('retains the OpenAI SDK nested third-party notices alongside its license', async () => {
+  const root=await mkdtemp(join(tmpdir(),'clipnote-notices-'));
+  const pkg=join(root,'node_modules','openai');await mkdir(join(pkg,'src','_vendor','partial-json-parser'),{recursive:true});
+  await writeFile(join(pkg,'package.json'),JSON.stringify({name:'openai',version:'7.21.0'}));
+  await writeFile(join(pkg,'LICENSE'),'sdk license');
+  await writeFile(join(pkg,'src','_vendor','partial-json-parser','LICENSE'),'parser license');
+  await mkdir(join(pkg,'src','_vendor','zod-to-json-schema'),{recursive:true});
+  await mkdir(join(pkg,'src','internal','qs'),{recursive:true});
+  await writeFile(join(pkg,'src','_vendor','zod-to-json-schema','LICENSE'),'zod license');
+  await writeFile(join(pkg,'src','internal','qs','LICENSE.md'),'qs license');
+  const out=join(root,'out'),rows=await createNoticeDraft({projectRoot:root,outputDir:out,packages:[{name:'openai',version:'7.21.0',path:pkg}]});
+  assert.equal(rows[0].files.length,4);
+  const texts=await Promise.all(rows[0].files.map(file=>readFile(join(out,file),'utf8')));
+  assert.deepEqual(texts.sort(),['parser license','qs license','sdk license','zod license']);
+});
+
+test('requires each nested notice for both supported OpenAI versions', async () => {
+  for(const version of ['7.19.0','7.21.0']) {
+    const paths=['src/_vendor/partial-json-parser/LICENSE','src/_vendor/zod-to-json-schema/LICENSE','src/internal/qs/LICENSE.md'];
+    for(const missing of paths) {
+      const root=await mkdtemp(join(tmpdir(),'clipnote-notices-')),pkg=join(root,'node_modules','openai');
+      await mkdir(pkg,{recursive:true});await writeFile(join(pkg,'package.json'),JSON.stringify({name:'openai',version}));
+      await writeFile(join(pkg,'LICENSE'),'sdk license');
+      for(const path of paths.filter(x=>x!==missing)){const file=join(pkg,path);await mkdir(join(file,'..'),{recursive:true});await writeFile(file,'notice');}
+      await assert.rejects(createNoticeDraft({projectRoot:root,outputDir:join(root,'out'),packages:[{name:'openai',version,path:pkg}]}),/ENOENT/);
+    }
+  }
+});

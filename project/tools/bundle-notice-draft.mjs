@@ -7,6 +7,15 @@ const supplements=new Map([
   ['@earendil-works/pi-telemetry@1.4.0',['pi-1.4.0-MIT.txt']],
   ['format@0.2.2',['format-upstream-MIT.md','format-0.2.2-README.md']],
 ]);
+const openAiVendoredNotices=[
+  ['src/_vendor/partial-json-parser/LICENSE','vendored-partial-json-LICENSE'],
+  ['src/_vendor/zod-to-json-schema/LICENSE','vendored-zod-to-json-schema-LICENSE'],
+  ['src/internal/qs/LICENSE.md','vendored-qs-LICENSE.md'],
+];
+const vendoredNotices=new Map([
+  ['openai@7.19.0',openAiVendoredNotices],
+  ['openai@7.21.0',openAiVendoredNotices],
+]);
 function inside(root,path) {
   const rel=relative(root,path);
   return rel!=='' && !isAbsolute(rel) && rel!=='..' && !rel.startsWith(`..${process.platform==='win32'?'\\':'/'}`);
@@ -41,6 +50,10 @@ export async function createNoticeDraft({projectRoot,outputDir,packages}) {
     for (const name of names) {
       const source=await realpath(join(sourceDir,name));if (!inside(sourceDir,source)) throw new Error('Invalid notice path');
       files.push({source,target:`${id}-${basename(name)}`});
+    }
+    for (const [path,label] of vendoredNotices.get(key)??[]) {
+      const source=await realpath(join(row.dir,path));if (!inside(row.dir,source)) throw new Error('Invalid vendored notice path');
+      files.push({source,target:`${id}-${label}`});
     }
     prepared.push({row,noticeSource,files});
   }
