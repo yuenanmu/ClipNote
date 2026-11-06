@@ -10,3 +10,9 @@
 - 其余包存在可识别许可或 NOTICE 文件，但仍需确认实际分发内容与声明覆盖范围；依赖清单不是完整法律审核。
 
 - 关联路径核对：standardwebhooks 由 pi-ai 的 Anthropic SDK 引入，proxy-agent-negotiate 由 pi-ai 的代理依赖引入，AWS 包由其 Bedrock 相关依赖引入；不能仅因当前界面未使用对应服务就直接排除。Standard Webhooks 上游 JavaScript package.json 当前仍声明版本 1.1.1 和 MIT（https://github.com/standard-webhooks/standard-webhooks/blob/main/libraries/javascript/package.json），但根许可为 Apache-2.0；版本对应的完整声明仍待核查。
+
+## 引入关系与内容核对（2026-11-06）
+
+- `standardwebhooks@1.1.1` 由 pi-ai 的 `@anthropic-ai/sdk` 引入；`proxy-agent-negotiate@1.1.0` 由 pi-ai 的 HTTP/HTTPS 代理依赖引入；AWS 包由 pi-ai 的 Bedrock 依赖树引入；`data-uri-to-buffer@4.0.1` 经 Google 认证依赖引入；`format@0.2.2` 经 Markdown 解析依赖引入。
+- 对内部候选 aIJzoa 按 package.json 比对复制后的包路径和 npm 生产依赖路径，未发现额外包目录；该检查不代表每个许可证文件完整，也不等于法律结论。
+- 固定版本 proxy-agent-negotiate 上游 package.json 声明 MIT（https://github.com/TooTallNate/proxy-agents/blob/proxy-agent-negotiate%401.1.0/packages/negotiate/package.json），该版本目录未找到独立许可文件；版权和完整声明仍待确认。
