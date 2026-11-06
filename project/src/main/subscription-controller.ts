@@ -5,7 +5,7 @@ function safeSession(value: any) {
   const identity = value?.identity;
   return {status:value.status, sharing:value.sharing, ...(typeof value.profileId === 'string' ? {profileId:value.profileId} : {}), ...(value?.error && typeof value.error.code === 'string' && Object.hasOwn(messages,value.error.code) ? {error:{code:value.error.code,message:messages[value.error.code]}} : {}), ...(identity ? {identity:{...(typeof identity.name === 'string' ? {name:identity.name} : {}), ...(typeof identity.email === 'string' ? {email:identity.email} : {})}} : {})};
 }
-export function createSubscriptionHandlers(client: Client, trusted: (event: unknown) => boolean): Record<Action, (event: unknown, ...args: unknown[]) => Promise<any>> {
+export function createSubscriptionHandlers(client: Client, trusted: (event: unknown) => boolean, cancelTask: (event:unknown)=>void | Promise<unknown> = ()=>{}): Record<Action, (event: unknown, ...args: unknown[]) => Promise<any>> {
   let busy = false;
   const handle = (action: Action) => async (event: unknown, ...args: unknown[]) => {
     if (!trusted(event) || args.length) return {status:'error', error:{code:'FORBIDDEN_REQUEST', message:'无法执行此操作。'}};
@@ -14,6 +14,7 @@ export function createSubscriptionHandlers(client: Client, trusted: (event: unkn
     if (busy) return {status:'error', error:{code:'busy', message:'连接操作正在进行。'}};
     busy = true;
     try {
+      if(action === 'signIn' || action === 'disconnect') await cancelTask(event);
       const value = action === 'signIn' ? await client.signIn!() : action === 'models' ? await client.listModels!() : await client.disconnect!();
       return {status:'ok', value:action === 'signIn' ? safeSession(value) : action === 'models' ? (value as any[]).map(item => ({slug:item.slug, displayName:item.displayName})) : null};
     } catch (error) {

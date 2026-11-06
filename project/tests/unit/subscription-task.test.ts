@@ -33,3 +33,8 @@ test('confirmation presents the verified account label without exposing extra id
  const task=createSubscriptionTask({trusted:()=>true,session:async()=>({status:'connected',sharing:true,profileId:'account',identity:{email:'person@example.test',secret:'private'}}),models:async()=>[{slug:'model'}],preview:async()=>({sourcePath:'source',notePath:'note',name:'note',exists:false}),analyze:async()=> 'x',stage:async()=>id});
  const result=await task.prepare(null,id,id,'model','');assert.equal(result.status,'ok');if(result.status!=='ok')throw new Error('prepare failed');assert.equal(result.value.accountLabel,'person@example.test');assert.doesNotMatch(JSON.stringify(result),/private/);
 });
+
+test('cancel while staging discards the late result',async()=>{
+ let release!:()=>void,discarded='';const task=createSubscriptionTask({trusted:()=>true,session:async()=>({status:'connected',sharing:true,profileId:'account'}),models:async()=>[{slug:'model'}],preview:async()=>({sourcePath:'source',notePath:'note',name:'note',exists:false}),analyze:async()=> 'x',stage:async()=>{await new Promise<void>(resolve=>{release=resolve;});return id;},discard:async(resultId:string)=>{discarded=resultId;}});
+ await task.prepare(null,id,id,'model','');await task.start(null);await new Promise(resolve=>setTimeout(resolve,0));await task.cancel(null);release();await new Promise(resolve=>setTimeout(resolve,0));assert.equal(discarded,id);const state=await task.state(null);assert.equal(state.status,'ok');if(state.status==='ok')assert.equal(state.value.status,'cancelled');
+});

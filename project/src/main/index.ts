@@ -90,7 +90,7 @@ app.whenReady().then(() => {
     credentialEncryption:{id:'electron-safe-storage-v1', isAvailable:()=>safeStorage.isEncryptionAvailable(), encrypt:value=>safeStorage.encryptString(value), decrypt:value=>safeStorage.decryptString(Buffer.from(value))},
     openBrowser:async value=>{const url=new URL(value);if(url.origin!=='https://auth.openai.com')throw new Error('Unexpected sign-in destination');await shell.openExternal(url.href);},
   });
-  const subscriptionHandlers = createSubscriptionHandlers(subscription, trusted);
+  const subscriptionHandlers = createSubscriptionHandlers(subscription, trusted, event=>subscriptionTask.cancel(event));
   for (const [action, handler] of Object.entries(subscriptionHandlers)) ipcMain.handle(`subscription:${action}`, handler);
   const smartsubConfig=join(local,'smartsub','settings.json');
   const smartsubHandlers=createSmartSubDiscoveryHandlers({isTrustedSender:trusted,find:findSmartSub,
@@ -178,7 +178,7 @@ app.whenReady().then(() => {
   });
   for(const [action,handler] of Object.entries(smartsubTaskHandlers))ipcMain.handle(`smartsub-task:${action}`,handler);
   const results=new NoteResults(join(local,'note-results'),workspace);
-  const subscriptionTask=createSubscriptionTask({trusted,session:()=>subscription.getSession(),models:()=>subscription.listModels(),preview:(id,folder)=>workspace.previewOutput(id,folder),analyze:async(id,plan,profile,model,instructions,signal)=>{const release=workspace.lockPaths([plan.sourcePath,plan.notePath]);try{const source:SourceSnapshot=await tasks.run(join(__dirname,'source-worker.cjs'),{filePath:await workspace.filePath('source',id)});if(plan.sourceChecksum && source.document.checksum!==plan.sourceChecksum)throw new WorkspaceError('CONFLICT');return (await analyzeSubscription(source.document,subscription,profile,model,{signal,instructions})).markdown;}finally{release();}},stage:(plan,markdown)=>results.add(plan,markdown)});
+  const subscriptionTask=createSubscriptionTask({trusted,session:()=>subscription.getSession(),models:()=>subscription.listModels(),preview:(id,folder)=>workspace.previewOutput(id,folder),analyze:async(id,plan,profile,model,instructions,signal)=>{const release=workspace.lockPaths([plan.sourcePath,plan.notePath]);try{const source:SourceSnapshot=await tasks.run(join(__dirname,'source-worker.cjs'),{filePath:await workspace.filePath('source',id)});if(plan.sourceChecksum && source.document.checksum!==plan.sourceChecksum)throw new WorkspaceError('CONFLICT');return (await analyzeSubscription(source.document,subscription,profile,model,{signal,instructions})).markdown;}finally{release();}},stage:(plan,markdown)=>results.add(plan,markdown),discard:id=>results.remove(id)});
   for(const [action,handler] of Object.entries(subscriptionTask))ipcMain.handle(`subscription-task:${action}`,action==='start'?(event,...args)=>guarded(event,'subscription',()=>handler(event,...args)):handler);
   const exporter=new ArchiveExporter(workspace,()=>new StorageService(join(local,'storage')).state());
   const stopWatching=workspace.subscribe(change=>{if(!window.isDestroyed())window.webContents.send('workspace:changed',change);});

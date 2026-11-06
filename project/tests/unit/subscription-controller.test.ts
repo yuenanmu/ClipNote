@@ -38,3 +38,8 @@ test('storage errors retain a safe actionable message without leaking details',a
  const state=await handlers.state('trusted');assert.match(state.value.error.message,/加密/);assert.doesNotMatch(JSON.stringify(state),/private detail/);
  const signIn=await handlers.signIn('trusted');assert.equal(signIn.error.code,'storage_encryption_unavailable');assert.doesNotMatch(JSON.stringify(signIn),/secret/);
 });
+
+test('account change cancels the active task before disconnect or sign-in',async()=>{
+ let cancelled=0;const handlers=createSubscriptionHandlers({disconnect:async()=>{},signIn:async()=>({status:'disconnected',sharing:false})},()=>true,()=>{cancelled++;});
+ await handlers.disconnect('trusted');await handlers.signIn('trusted');assert.equal(cancelled,2);
+});
