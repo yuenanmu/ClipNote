@@ -1,5 +1,5 @@
 import {cp,mkdir,mkdtemp,readFile,writeFile,rename,readdir} from 'node:fs/promises';
-import {resolve,join,relative,isAbsolute} from 'node:path';
+import {resolve,join,relative,isAbsolute,dirname} from 'node:path';
 import {execFileSync} from 'node:child_process';
 if(process.platform!=='win32')throw new Error('Windows packaging must run on Windows.');
 const root=process.cwd(),outRoot=resolve(root,'../.local/releases');
@@ -12,7 +12,8 @@ execFileSync('powershell.exe',['-NoProfile','-File',join(resourceDir,'update-ide
 const {unlink}=await import('node:fs/promises');await unlink(object);await unlink(library);
 const app=join(output,'resources','app');await mkdir(app,{recursive:true});await cp(resolve(root,'dist'),join(app,'dist'),{recursive:true});
 await writeFile(join(app,'package.json'),JSON.stringify({name:'clipnote',productName:'ClipNote',version:'0.1.0-candidate',main:'dist/main/index.cjs'},null,2));
-const paths=execFileSync('npm.cmd',['ls','--omit=dev','--all','--parseable'],{cwd:root,encoding:'utf8',shell:true}).split(/\r?\n/).slice(1).filter(Boolean);
+const npmCli=process.env.npm_execpath ?? join(dirname(process.execPath),'node_modules','npm','bin','npm-cli.js');
+const paths=execFileSync(process.execPath,[npmCli,'ls','--omit=dev','--all','--parseable'],{cwd:root,encoding:'utf8'}).split(/\r?\n/).slice(1).filter(Boolean);
 const inventory=new Map(),missingNotices=new Map();
 for(const path of paths){const rel=relative(root,path);if(isAbsolute(rel)||rel.startsWith('..')||!rel.startsWith('node_modules'))throw new Error('Unexpected dependency path');await cp(path,join(app,rel),{recursive:true,force:true});try{const dep=JSON.parse(await readFile(join(path,'package.json'),'utf8'));const key=`${dep.name}@${dep.version}`;inventory.set(key,dep.license??dep.licenses??'UNKNOWN');if(!(await readdir(path)).some(name=>/^(licen[sc]e|copying|notice)(\.|$)/i.test(name)))missingNotices.set(key,dep.license??dep.licenses??'UNKNOWN');}catch{throw new Error('Cannot read dependency metadata: '+rel);}}
 await cp(resolve(root,'../docs/Windows候选使用说明.md'),join(output,'使用说明.md'));
