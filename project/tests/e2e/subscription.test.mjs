@@ -5,6 +5,7 @@ import {dirname,join,resolve} from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {_electron as electron} from 'playwright';
 import electronPath from 'electron';
+import {createServer} from 'node:http';
 
 test('subscription settings and file confirmation use safe synthetic services',{timeout:60000},async t=>{
  const base=fileURLToPath(new URL('../../../.local/test-artifacts/',import.meta.url));mkdirSync(base,{recursive:true});const own=mkdtempSync(join(base,'subscription-ui-')),sources=join(own,'sources'),notes=join(own,'notes');mkdirSync(sources);mkdirSync(notes);writeFileSync(join(sources,'sample.txt'),'合成内容');
@@ -20,4 +21,11 @@ test('encrypted synthetic subscription is restored after a real desktop restart'
  app=await launch();const ciphertext=await app.evaluate(({safeStorage},data)=>safeStorage.encryptString(JSON.stringify(data)).toString('base64'),value);await app.close();app=undefined;
  const path=join(own,'profile','subscription');mkdirSync(path,{recursive:true});writeFileSync(join(path,'chatgpt-auth.json'),JSON.stringify({version:3,provider:'electron-safe-storage-v1',ciphertext}));
  assert.doesNotMatch(readFileSync(join(path,'chatgpt-auth.json'),'utf8'),/synthetic-restart-secret/);app=await launch();const page=await app.firstWindow();await page.getByRole('button',{name:'设置',exact:true}).click();await page.getByRole('tab',{name:'ChatGPT 订阅'}).click();await page.getByText(/已连接 test@example.test/).waitFor();const result=await page.evaluate(()=>window.clipnote.subscriptionState());assert.equal(result.value.sharing,true);assert.doesNotMatch(JSON.stringify(result),/synthetic-restart-secret/);
+});
+
+test('subscription network session remains separate from renderer blocking',{timeout:60000},async t=>{
+ const base=fileURLToPath(new URL('../../../.local/test-artifacts/',import.meta.url));mkdirSync(base,{recursive:true});const own=mkdtempSync(join(base,'subscription-network-ui-'));let calls=0;const server=createServer((_req,res)=>{calls++;res.end('synthetic');});await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));const url=`http://127.0.0.1:${server.address().port}/`;const env={...process.env,CLIPNOTE_TEST_USER_DATA:join(own,'profile')};delete env.ELECTRON_RUN_AS_NODE;let app;
+ t.after(async()=>{if(app)await app.close();await new Promise(resolve=>server.close(resolve));assert.equal(resolve(dirname(own)),resolve(base));rmSync(own,{recursive:true,force:true});});app=await electron.launch({executablePath:electronPath,args:[fileURLToPath(new URL('../../dist/main/index.cjs',import.meta.url))],env});const page=await app.firstWindow();
+ const isolated=await app.evaluate(async({session},url)=>{const response=await session.fromPartition('clipnote-subscription').fetch(url);return response.text();},url);assert.equal(isolated,'synthetic');assert.equal(calls,1);
+ const blocked=await page.evaluate(url=>fetch(url).then(()=>false,()=>true),url);assert.equal(blocked,true);assert.equal(calls,1);
 });
