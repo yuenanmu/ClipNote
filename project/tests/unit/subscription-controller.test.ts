@@ -43,3 +43,8 @@ test('account change cancels the active task before disconnect or sign-in',async
  let cancelled=0;const handlers=createSubscriptionHandlers({disconnect:async()=>{},signIn:async()=>({status:'disconnected',sharing:false})},()=>true,()=>{cancelled++;});
  await handlers.disconnect('trusted');await handlers.signIn('trusted');assert.equal(cancelled,2);
 });
+
+test('remote revocation failure gives an accurate fixed warning',async()=>{
+ const handlers=createSubscriptionHandlers({disconnect:async()=>{throw Object.assign(new Error('secret'),{code:'revocation_failed'});}},()=>true);
+ const result=await handlers.disconnect('trusted');assert.equal(result.error.code,'revocation_failed');assert.match(result.error.message,/本地/);assert.match(result.error.message,/远端/);assert.doesNotMatch(JSON.stringify(result),/secret/);
+});

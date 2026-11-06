@@ -14,7 +14,7 @@ export function SubscriptionSettings(){
     <div className="api-actions"><button className="primary" disabled={busy} onClick={()=>void run(async()=>{const result=await window.clipnote.subscriptionSignIn();if(result.status==='error')throw new Error(result.error.message);await refresh();})}>登录 ChatGPT</button>
     {busy && <button className="secondary" onClick={()=>void window.clipnote.subscriptionCancel()}>取消登录</button>}
     <button className="secondary" disabled={busy || session?.status!=='connected'} onClick={()=>void run(async()=>{const result=await window.clipnote.subscriptionModels();if(result.status!=='ok')throw new Error(result.status==='error'?result.error.message:'操作已取消。');setModels(result.value);})}>获取可用模型</button>
-    <button className="secondary" disabled={busy || session?.status!=='connected'} onClick={()=>void run(async()=>{const result=await window.clipnote.subscriptionDisconnect();if(result.status==='error')throw new Error(result.error.message);setModels([]);await refresh();})}>退出登录</button></div>
+    <button className="secondary" disabled={busy || session?.status!=='connected'} onClick={()=>void run(async()=>{const result=await window.clipnote.subscriptionDisconnect();setModels([]);await refresh();if(result.status==='error')throw new Error(result.error.message);})}>退出登录</button></div>
     {(message || session?.error) && <p role="alert">{message || session?.error?.message}</p>}{models.length>0 && <p>可用模型：{models.map(model=>model.displayName).join('、')}</p>}
   </section>;
 }
