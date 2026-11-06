@@ -3,9 +3,9 @@ import {createHash} from 'node:crypto';
 import {basename,isAbsolute,join,relative,resolve} from 'node:path';
 
 const supplements=new Map([
-  ['@earendil-works/pi-ai@1.4.0','pi-1.4.0-MIT.txt'],
-  ['@earendil-works/pi-telemetry@1.4.0','pi-1.4.0-MIT.txt'],
-  ['format@0.2.2','format-upstream-MIT.md'],
+  ['@earendil-works/pi-ai@1.4.0',['pi-1.4.0-MIT.txt']],
+  ['@earendil-works/pi-telemetry@1.4.0',['pi-1.4.0-MIT.txt']],
+  ['format@0.2.2',['format-upstream-MIT.md','format-0.2.2-README.md']],
 ]);
 function inside(root,path) {
   const rel=relative(root,path);
@@ -33,9 +33,9 @@ export async function createNoticeDraft({projectRoot,outputDir,packages}) {
     let names=(await readdir(row.dir,{withFileTypes:true})).filter(x=>x.isFile()&&/^(licen[sc]e|copying|notice)(\.|$)/i.test(x.name)).map(x=>x.name).sort();
     let noticeSource='package',sourceDir=row.dir;
     if (!names.length) {
-      const name=supplements.get(key);if (!name) throw new Error(`Missing notice: ${key}`);
+      const supplement=supplements.get(key);if (!supplement) throw new Error(`Missing notice: ${key}`);
       sourceDir=await realpath(join(root,'licenses'));if (!inside(root,sourceDir)) throw new Error('Invalid supplemental path');
-      names=[name];noticeSource='supplemental';
+      names=supplement;noticeSource='supplemental';
     }
     const id=createHash('sha256').update(key).digest('hex').slice(0,16),files=[];
     for (const name of names) {

@@ -43,3 +43,16 @@ test('uses known version-specific supplemental notices and merges groups', async
   assert.equal(rows.length,1);assert.deepEqual(rows[0].groups,['main','renderer']);
   assert.equal(rows[0].noticeSource,'supplemental');assert.equal(await readFile(join(out,rows[0].files[0]),'utf8'),'pi notice');
 });
+
+test('format supplemental notices include the fixed-version readme and current license', async () => {
+  const root=await mkdtemp(join(tmpdir(),'clipnote-notices-'));
+  const pkg=join(root,'node_modules','format');await mkdir(pkg,{recursive:true});
+  await writeFile(join(pkg,'package.json'),JSON.stringify({name:'format',version:'0.2.2'}));
+  await mkdir(join(root,'licenses'));
+  await writeFile(join(root,'licenses','format-upstream-MIT.md'),'current license');
+  await writeFile(join(root,'licenses','format-0.2.2-README.md'),'version notice');
+  const out=join(root,'out'),rows=await createNoticeDraft({projectRoot:root,outputDir:out,packages:[{name:'format',version:'0.2.2',path:pkg}]});
+  assert.equal(rows[0].files.length,2);
+  const texts=await Promise.all(rows[0].files.map(file=>readFile(join(out,file),'utf8')));
+  assert.deepEqual(texts.sort(),['current license','version notice']);
+});
