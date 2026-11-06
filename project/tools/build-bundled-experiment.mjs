@@ -5,6 +5,7 @@ import {dirname,join,resolve} from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {collectEmbeddedPackages} from './embedded-packages.mjs';
 import {createNoticeDraft} from './bundle-notice-draft.mjs';
+import {rendererAssetDependencies} from './renderer-asset-dependencies.mjs';
 
 const root=resolve(dirname(fileURLToPath(import.meta.url)),'..');
 const parent=resolve(root,'../.local/bundle-experiments');
@@ -27,6 +28,8 @@ await buildRenderer({configFile:false,root:join(root,'src/renderer'),base:'./',b
         }
       }
     }
+    // CSS and asset modules may not contribute rendered JavaScript bytes.
+    for (const item of rendererAssetDependencies([...this.getModuleIds()])) sources.set(`renderer:${item.path}`,item);
   },
 }]});
 const packages=await collectEmbeddedPackages({projectRoot:root,files:[...sources.values()]});
