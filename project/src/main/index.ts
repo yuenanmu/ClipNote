@@ -1,4 +1,4 @@
-import { app, BrowserWindow, dialog, ipcMain, shell, safeStorage } from 'electron';
+import { app, BrowserWindow, dialog, ipcMain, shell, safeStorage, session } from 'electron';
 import type { IpcMainInvokeEvent } from 'electron';
 import { mkdirSync } from 'node:fs';
 import { join, resolve, sep } from 'node:path';
@@ -6,6 +6,12 @@ import { createImportHandler } from './import-controller.ts';
 import { createStorageHandlers } from './storage-controller.ts';
 import { createReaderHandlers } from './reader-controller.ts';
 import { createApiHandlers } from './api-controller.ts';
+import { createSubscriptionTask } from './subscription-task.ts';
+import { analyzeSubscription } from '../modules/subscription/analyze.ts';
+import { createSubscriptionHandlers } from './subscription-controller.ts';
+import { createSubscriptionFetch } from '../modules/subscription/transport.ts';
+import { createChatGPT } from '../../vendor/siwc/src/index.ts';
+import { setSubscriptionTransport } from '../../vendor/siwc/src/transport.ts';
 import { createWorkflowHandlers } from './workflow-controller.ts';
 import { createWorkspaceHandler } from './workspace-controller.ts';
 import { createBatchHandlers } from './batch-controller.ts';
@@ -77,6 +83,15 @@ app.whenReady().then(() => {
   window.webContents.on('will-prevent-unload',event=>{const response=dialog.showMessageBoxSync(window,{type:'question',title:'未保存的笔记',message:'笔记还有未保存的修改，是否放弃修改并退出？',buttons:['继续编辑','放弃并退出'],defaultId:0,cancelId:0});if(response===1)event.preventDefault();});
   window.webContents.session.webRequest.onBeforeRequest({ urls: ['http://*/*', 'https://*/*', 'ws://*/*', 'wss://*/*'] }, (_details, callback) => callback({ cancel: true }));
   const trusted = (event: unknown) => { const request = event as IpcMainInvokeEvent; return !window.isDestroyed() && request.sender === window.webContents && request.senderFrame === window.webContents.mainFrame; };
+  const subscriptionSession = session.fromPartition('clipnote-subscription');
+  setSubscriptionTransport(createSubscriptionFetch(subscriptionSession.fetch.bind(subscriptionSession) as typeof fetch));
+  const subscription = createChatGPT({
+    appName:'ClipNote', appId:'clipnote', redirectPort:0, storageDir:join(local,'subscription'),
+    credentialEncryption:{id:'electron-safe-storage-v1', isAvailable:()=>safeStorage.isEncryptionAvailable(), encrypt:value=>safeStorage.encryptString(value), decrypt:value=>safeStorage.decryptString(Buffer.from(value))},
+    openBrowser:async value=>{const url=new URL(value);if(url.origin!=='https://auth.openai.com')throw new Error('Unexpected sign-in destination');await shell.openExternal(url.href);},
+  });
+  const subscriptionHandlers = createSubscriptionHandlers(subscription, trusted, event=>subscriptionTask.cancel(event));
+  for (const [action, handler] of Object.entries(subscriptionHandlers)) ipcMain.handle(`subscription:${action}`, handler);
   const smartsubConfig=join(local,'smartsub','settings.json');
   const smartsubHandlers=createSmartSubDiscoveryHandlers({isTrustedSender:trusted,find:findSmartSub,
     load:async()=>{if(!await exists(smartsubConfig))return undefined;const value=await readJson(smartsubConfig);if(value.version!==1 || typeof value.path!=='string' || Object.keys(value).sort().join(',')!=='path,version')throw new Error('Invalid configuration');return value.path;},
@@ -137,7 +152,7 @@ app.whenReady().then(() => {
   let readerRequests:Promise<unknown>=Promise.resolve();
   for (const [action, handler] of Object.entries(readerHandlers)) ipcMain.handle(`reader:${action}`,(event,...args)=>{const operation=readerRequests.then(()=>handler(event,...args));readerRequests=operation.catch(()=>{});return operation;});
   const apiStore = new ApiConfigStore(join(local, 'api'), safeStorage);
-  let activeJob: 'single' | 'batch' | undefined, gateBusy = false;
+  let activeJob: 'single' | 'batch' | 'subscription' | undefined, gateBusy = false;
   const workspace = new WorkspaceFiles(join(local, 'workspace'));
   const smartsubInstallation=async()=>{
     const found=await smartsubHandlers.state({sender:window.webContents,senderFrame:window.webContents.mainFrame});
@@ -163,6 +178,8 @@ app.whenReady().then(() => {
   });
   for(const [action,handler] of Object.entries(smartsubTaskHandlers))ipcMain.handle(`smartsub-task:${action}`,handler);
   const results=new NoteResults(join(local,'note-results'),workspace);
+  const subscriptionTask=createSubscriptionTask({trusted,session:()=>subscription.getSession(),models:()=>subscription.listModels(),preview:(id,folder)=>workspace.previewOutput(id,folder),analyze:async(id,plan,profile,model,instructions,signal)=>{const release=workspace.lockPaths([plan.sourcePath,plan.notePath]);try{const source:SourceSnapshot=await tasks.run(join(__dirname,'source-worker.cjs'),{filePath:await workspace.filePath('source',id)});if(plan.sourceChecksum && source.document.checksum!==plan.sourceChecksum)throw new WorkspaceError('CONFLICT');return (await analyzeSubscription(source.document,subscription,profile,model,{signal,instructions})).markdown;}finally{release();}},stage:(plan,markdown)=>results.add(plan,markdown),discard:id=>results.remove(id)});
+  for(const [action,handler] of Object.entries(subscriptionTask))ipcMain.handle(`subscription-task:${action}`,action==='start'?(event,...args)=>guarded(event,'subscription',()=>handler(event,...args)):handler);
   const exporter=new ArchiveExporter(workspace,()=>new StorageService(join(local,'storage')).state());
   const stopWatching=workspace.subscribe(change=>{if(!window.isDestroyed())window.webContents.send('workspace:changed',change);});
   const workspaceHandler = createWorkspaceHandler({ isTrustedSender: trusted, execute: async (kind, action, args) => {
@@ -193,7 +210,7 @@ app.whenReady().then(() => {
     if (gateBusy) return { status: 'error', error: { code: 'BUSY', message: '整理任务进行中，请稍后操作文件。' } };
     gateBusy = true;
     try {
-      if (activeJob==='single' && await isJobActive(event)) return { status: 'error', error: { code: 'BUSY', message: '旧整理任务进行中，请稍后操作文件。' } };
+      if ((activeJob==='single' || activeJob==='subscription') && await isJobActive(event)) return { status: 'error', error: { code: 'BUSY', message: '整理任务进行中，请稍后操作文件。' } };
       return await queuedWorkspace(event,kind,action,args);
     } finally { gateBusy = false; }
   });
@@ -231,11 +248,11 @@ app.whenReady().then(() => {
   ipcMain.handle('archive:preview',(event,...args)=>fileAction(event,async()=>{if(args.length!==1 || !isUuid(args[0]))throw new WorkspaceError('INVALID_REQUEST');return exporter.preview(args[0]);}));
   ipcMain.handle('archive:export',(event,...args)=>fileAction(event,async()=>{const [folder,selected]=args;if(args.length!==2 || !isUuid(folder) || !Array.isArray(selected) || !selected.length || selected.length>1000 || selected.some(item=>!item || !isUuid(item.id) || typeof item.name!=='string' || item.name.length>200))throw new WorkspaceError('INVALID_REQUEST');return exporter.export(folder,selected);}));
   async function isJobActive(event: unknown): Promise<boolean> {
-    if (!activeJob) return false; const response = activeJob === 'single' ? await workflowHandlers.state(event) : await batchHandlers.state(event);
+    if (!activeJob) return false; const response = activeJob === 'single' ? await workflowHandlers.state(event) : activeJob === 'subscription' ? await subscriptionTask.state(event) : await batchHandlers.state(event);
     if (response.status === 'ok' && ['running','saving'].includes(response.value.status)) return true;
     activeJob = undefined; return false;
   }
-  const guarded = async (event: unknown, type: 'single' | 'batch', run: () => Promise<any>) => {
+  const guarded = async (event: unknown, type: 'single' | 'batch' | 'subscription', run: () => Promise<any>) => {
     if (!trusted(event) || gateBusy) return { status: 'error', error: { code: 'BUSY', message: '已有整理任务正在进行。' } };
     gateBusy = true; try { if (await isJobActive(event)) return { status: 'error', error: { code: 'BUSY', message: '已有整理任务正在进行。' } };
       activeJob = type; const result = await run(); if (result.status !== 'ok' || !['running','saving'].includes(result.value.status)) activeJob = undefined; return result;
@@ -257,7 +274,11 @@ app.whenReady().then(() => {
   } });
   for (const [action, handler] of Object.entries(apiHandlers)) ipcMain.handle(`api:${action}`, handler);
   window.once('ready-to-show', () => window.show());
+  window.on('close', () => { void subscriptionTask.cancel({sender:window.webContents,senderFrame:window.webContents.mainFrame}); });
   window.on('closed', () => {
+    subscription.cancelSignIn();
+    for(const action of Object.keys(subscriptionTask))ipcMain.removeHandler(`subscription-task:${action}`);
+    for (const action of Object.keys(subscriptionHandlers)) ipcMain.removeHandler(`subscription:${action}`);
     for(const action of ['state','save'])ipcMain.removeHandler(`smartsub-preferences:${action}`);
     for(const action of ['state','choose','openOfficial'])ipcMain.removeHandler(`smartsub:${action}`);
     for(const action of Object.keys(smartsubTaskHandlers))ipcMain.removeHandler(`smartsub-task:${action}`);

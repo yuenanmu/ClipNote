@@ -12,7 +12,17 @@ export type ReaderResult<T> = { status: 'ok'; value: T } | { status: 'cancelled'
 export type ImportErrorCode = SourceErrorCode | 'IMPORT_BUSY' | 'FORBIDDEN_REQUEST' | 'IMPORT_FAILED';
 export type ImportResult = { status: 'imported'; document: SourceDocument; entryId?:string } | { status: 'cancelled' } | { status: 'error'; error: { code: ImportErrorCode; message: string } };
 export type StorageResult<T> = { status: 'ok'; value: T } | { status: 'cancelled' } | { status: 'error'; error: { code: StorageErrorCode | 'FORBIDDEN_REQUEST' | 'STORAGE_BUSY'; message: string; draftId?: string } };
+export interface SubscriptionTaskState {status:'idle'|'ready'|'running'|'done'|'failed'|'cancelled'; model?:string;profileId?:string;accountLabel?:string;sourcePath?:string;outputPath?:string;overwrite?:boolean;resultId?:string;error?:string}
 export interface DesktopApi {
+  subscriptionTaskState():Promise<WorkspaceResult<SubscriptionTaskState>>;
+  subscriptionTaskPrepare(id:string,folder:string,model:string,instructions:string):Promise<WorkspaceResult<SubscriptionTaskState>>;
+  subscriptionTaskStart():Promise<WorkspaceResult<SubscriptionTaskState>>;
+  subscriptionTaskCancel():Promise<WorkspaceResult<SubscriptionTaskState>>;
+  subscriptionState():Promise<WorkspaceResult<{status:string;sharing:boolean;profileId?:string;identity?:{name?:string;email?:string};error?:{code:string;message:string}}>>;
+  subscriptionSignIn():Promise<WorkspaceResult<unknown>>;
+  subscriptionCancel():Promise<WorkspaceResult<null>>;
+  subscriptionModels():Promise<WorkspaceResult<{slug:string;displayName:string}[]>>;
+  subscriptionDisconnect():Promise<WorkspaceResult<null>>;
   smartsubPreferences():Promise<WorkspaceResult<SmartSubPreferencesView>>;
   smartsubSavePreferences(selection:SmartSubSelection):Promise<WorkspaceResult<SmartSubSelection>>;
   smartsubState():Promise<WorkspaceResult<SmartSubDiscovery>>;
