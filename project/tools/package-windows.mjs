@@ -1,6 +1,7 @@
 import {cp,mkdir,mkdtemp,readFile,writeFile,rename,readdir} from 'node:fs/promises';
 import {resolve,join,relative,isAbsolute,dirname} from 'node:path';
 import {execFileSync} from 'node:child_process';
+import {buildProvenance} from './build-provenance.mjs';
 if(process.platform!=='win32')throw new Error('Windows packaging must run on Windows.');
 const root=process.cwd(),outRoot=resolve(root,'../.local/releases');
 execFileSync(process.execPath,['tools/build-desktop.mjs'],{cwd:root,stdio:'inherit'});await mkdir(outRoot,{recursive:true});
@@ -18,5 +19,6 @@ const inventory=new Map(),missingNotices=new Map();
 for(const path of paths){const rel=relative(root,path);if(isAbsolute(rel)||rel.startsWith('..')||!rel.startsWith('node_modules'))throw new Error('Unexpected dependency path');await cp(path,join(app,rel),{recursive:true,force:true});try{const dep=JSON.parse(await readFile(join(path,'package.json'),'utf8'));const key=`${dep.name}@${dep.version}`;inventory.set(key,dep.license??dep.licenses??'UNKNOWN');if(!(await readdir(path)).some(name=>/^(licen[sc]e|copying|notice)(\.|$)/i.test(name)))missingNotices.set(key,dep.license??dep.licenses??'UNKNOWN');}catch{throw new Error('Cannot read dependency metadata: '+rel);}}
 await cp(resolve(root,'../docs/Windows候选使用说明.md'),join(output,'使用说明.md'));
 const notices=join(output,'licenses');await mkdir(notices);await cp(resolve(root,'vendor/siwc/LICENSE'),join(notices,'SIWC-LICENSE.txt'));await cp(resolve(root,'vendor/siwc/THIRD_PARTY_NOTICES.md'),join(notices,'SIWC-THIRD-PARTY.md'));await cp(resolve(root,'licenses/pi-1.4.0-MIT.txt'),join(notices,'pi-1.4.0-MIT.txt'));await cp(resolve(root,'licenses/aws-apache-2.0.txt'),join(notices,'aws-apache-2.0.txt'));await writeFile(join(notices,'production-dependencies.json'),JSON.stringify(Object.fromEntries([...inventory].sort()),null,2));await writeFile(join(notices,'unresolved-notices.json'),JSON.stringify(Object.fromEntries([...missingNotices].sort()),null,2));
+await writeFile(join(output,'build-info.json'),JSON.stringify(await buildProvenance(root,join(output,'ClipNote.exe')),null,2));
 await writeFile(join(output,'内部候选-不可分发.txt'),'此目录仅用于开发测试。依赖许可证、目标电脑与真实服务验收尚未完成，请勿分发。\n','utf8');
 console.log(output);
