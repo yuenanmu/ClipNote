@@ -1,3 +1,4 @@
+import {electronTestTarget} from './electron-target.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {mkdirSync,mkdtempSync,writeFileSync,copyFileSync,rmSync,existsSync} from 'node:fs';
@@ -7,7 +8,7 @@ import {_electron as electron} from 'playwright';
 import electronPath from 'electron';
 
 test('video link uses the task bridge and opens the obtained synthetic subtitle',{timeout:120000},async t=>{
-  const base=fileURLToPath(new URL('../../../.local/test-artifacts/',import.meta.url));mkdirSync(base,{recursive:true});const own=mkdtempSync(join(base,'smartsub-flow-'));
+  const target=electronTestTarget(),base=target.artifacts;mkdirSync(base,{recursive:true});const own=mkdtempSync(join(base,'smartsub-flow-'));
   const profile=join(own,'profile'),install=join(profile,'中文 空格 SmartSub'),cli=join(install,'resources','automation','cli.cjs');mkdirSync(dirname(cli),{recursive:true});copyFileSync(process.execPath,join(install,'SmartSub.exe'));
   writeFileSync(cli,`const fs=require('fs'),path=require('path');let s='';process.stdin.on('data',x=>s+=x);process.stdin.on('end',()=>{const a=JSON.parse(s),op=process.argv.slice(2,-3).join('.'),state=path.join(__dirname,'fixture.json');let v;
     if(op==='system.info')v={version:'3.10.1',apiVersion:1,profile:__dirname};
@@ -24,7 +25,7 @@ test('video link uses the task bridge and opens the obtained synthetic subtitle'
     else if(op==='subtitles.read')v={filePath:a.filePath,version:'v1',format:'srt',total:1,offset:0,cues:[{startMs:1000,endMs:2000,text:'合成视频字幕'}]};
     else throw Error('unexpected '+op);process.stdout.write(JSON.stringify(v));});`);
   const env={...process.env,CLIPNOTE_TEST_USER_DATA:profile,CLIPNOTE_TEST_SMARTSUB_ROOT:install};delete env.ELECTRON_RUN_AS_NODE;
-  const app=await electron.launch({executablePath:electronPath,args:[fileURLToPath(new URL('../../dist/main/index.cjs',import.meta.url))],env});
+  const app=await electron.launch({executablePath:target.executablePath,args:target.args,env});
   t.after(async()=>{await app.close();assert.equal(resolve(dirname(own)),resolve(base));rmSync(own,{recursive:true,force:true});});
   const page=await app.firstWindow();page.setDefaultTimeout(15000);await page.getByRole('button',{name:'视频链接',exact:true}).click();
   assert.equal(await page.getByRole('navigation',{name:'工作区'}).isVisible(),true,'video stays inside the workspace shell');

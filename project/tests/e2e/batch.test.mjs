@@ -1,3 +1,4 @@
+import {electronTestTarget} from './electron-target.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createServer } from 'node:http';
@@ -8,7 +9,7 @@ import { _electron as electron } from 'playwright';
 import electronPath from 'electron';
 
 test('batch confirms, processes selected sources serially and protects edited notes', {timeout:120000}, async t => {
-  const base=fileURLToPath(new URL('../../../.local/test-artifacts/',import.meta.url)); mkdirSync(base,{recursive:true}); const own=mkdtempSync(join(base,'batch-ui-'));
+  const target=electronTestTarget(),base=target.artifacts; mkdirSync(base,{recursive:true}); const own=mkdtempSync(join(base,'batch-ui-'));
   const sources=join(own,'资料'), notes=join(own,'笔记'); mkdirSync(sources); mkdirSync(notes); writeFileSync(join(sources,'a.txt'),'失败资料'); writeFileSync(join(sources,'b.txt'),'成功资料');
   let calls=0, failing=true, active=0, max=0,delay=120;writeFileSync(join(sources,'c.txt'),'未选择资料');
   const server=createServer(async(req,res)=>{ active++; max=Math.max(active,max); calls++; const chunks=[]; for await(const part of req) chunks.push(part); const body=JSON.parse(Buffer.concat(chunks).toString());
@@ -20,7 +21,7 @@ test('batch confirms, processes selected sources serially and protects edited no
   await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve)); const baseUrl=`http://127.0.0.1:${server.address().port}/v1`;
   const env={...process.env,CLIPNOTE_TEST_USER_DATA:join(own,'profile')}; delete env.ELECTRON_RUN_AS_NODE; let app;
   t.after(async()=>{ if(app) await app.close(); await new Promise(resolve=>{server.closeAllConnections();server.close(resolve);}); assert.equal(resolve(dirname(own)),resolve(base)); rmSync(own,{recursive:true,force:true}); });
-  app=await electron.launch({executablePath:electronPath,args:[fileURLToPath(new URL('../../dist/main/index.cjs',import.meta.url))],env}); const page=await app.firstWindow(); page.setDefaultTimeout(15000);
+  app=await electron.launch({executablePath:target.executablePath,args:target.args,env}); const page=await app.firstWindow(); page.setDefaultTimeout(15000);
   const config=await page.evaluate(input=>window.clipnote.apiSave(input),{baseUrl,model:'fixture',contextWindow:8192,maxTokens:2048,apiKey:'synthetic-key'}); assert.equal(config.status,'ok');
   const pick=path=>app.evaluate(({dialog},selected)=>{dialog.showOpenDialog=async()=>({canceled:false,filePaths:[selected]});},path);
   await pick(sources); const tree=page.getByRole('region',{name:'资料文件夹'}); await tree.getByRole('button',{name:'打开资料文件夹',exact:true}).click(); await tree.getByRole('treeitem',{name:'a.txt',exact:true}).click(); await tree.getByRole('treeitem',{name:'b.txt',exact:true}).click({modifiers:['Control']});
