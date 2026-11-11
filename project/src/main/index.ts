@@ -2,6 +2,7 @@ import { app, BrowserWindow, dialog, ipcMain, shell, safeStorage, session } from
 import type { IpcMainInvokeEvent } from 'electron';
 import { mkdirSync } from 'node:fs';
 import { join, resolve, sep } from 'node:path';
+import { desktopDataPath } from './data-path.ts';
 import { createImportHandler } from './import-controller.ts';
 import { createStorageHandlers } from './storage-controller.ts';
 import { createReaderHandlers } from './reader-controller.ts';
@@ -48,7 +49,7 @@ import type {AnalysisMetrics} from '../contracts/analysis.ts';
 const projectRoot = resolve(__dirname, '../../..');
 const testRoot = join(projectRoot, '.local/test-artifacts');
 const requestedProfile = process.env.CLIPNOTE_TEST_USER_DATA;
-const local = requestedProfile ? resolve(requestedProfile) : join(projectRoot, '.local/desktop');
+const local = requestedProfile ? resolve(requestedProfile) : desktopDataPath({packaged:app.isPackaged,projectRoot,appData:app.getPath('appData')});
 if (requestedProfile && !local.startsWith(testRoot + sep)) throw new Error('Test profile must be inside test artifacts');
 mkdirSync(local, { recursive: true });
 app.setPath('userData', local);
