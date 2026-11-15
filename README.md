@@ -25,3 +25,12 @@ T04 经用户实际试用认可，已于2026-10-27合入本地 main（b1b5880）
 技术路线采用 Electron、React、TypeScript 与 pi-ai，SmartSub 通过 CLI 适配。T02 曾在 A 电脑完成一次订阅文本请求；B 的本地运行环境和桌面功能已建立，官方登录仍待可用网络。API、完整登录生命周期、SmartSub 实际任务与打包仍需真实验收。
 
 本地来源、生成笔记、模型、运行时和凭据不进入 Git；仅保存必要的公开或合成验证资料。
+
+
+在仓库根目录（终端路径以 `ClipNote` 结尾）启动已构建的应用：
+
+```powershell
+npm.cmd --prefix .\project start
+```
+
+根目录没有 `package.json`，不要在这里直接执行 `npm.cmd start`。如需重新构建，在根目录执行 `npm.cmd --prefix .\project run build`；启动命令本身不会构建。

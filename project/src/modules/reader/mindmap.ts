@@ -10,7 +10,7 @@ export function buildMindmap(root: Root): MindmapNode {
   const result: MindmapNode = { id: '@map-root', kind: 'root', label: '文档', children: [] };
   const headings: { depth: number; map: MindmapNode }[] = [];
   const position = (node: Nodes, blockIndex: number): ReaderPosition => ({ id: String((node.data as { readerId?: string })?.readerId), blockIndex });
-  const make = (node: Nodes, blockIndex: number, label: string, kind: MindmapNode['kind']): MindmapNode => ({ id: position(node, blockIndex).id, kind, label, target: position(node, blockIndex), children: [] });
+  const make = (node: Nodes, blockIndex: number, label: string, kind: MindmapNode['kind']): MindmapNode => ({ id: position(node, blockIndex).id, kind, label: label.trim(), target: position(node, blockIndex), children: [] });
   function walk(nodes: Nodes[], parent: MindmapNode, blockIndex: number, inList = false) {
     let current = parent;
     const localHeadings: { depth: number; map: MindmapNode }[] = [];

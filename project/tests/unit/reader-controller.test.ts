@@ -14,6 +14,11 @@ function setup(options: Record<string, unknown> = {}) {
   const handlers = createReaderHandlers({ isTrustedSender: event => event === 'trusted', chooseFile: async () => 'D:/资料.md', load: async target => { calls.push(target); return loaded; }, openFile: async path => { calls.push(path); return ''; }, openLink: async url => { calls.push(url); }, ...options });
   return { handlers, calls };
 }
+test('a workspace Markdown opens directly through its file capability and revalidates after moving',async()=>{
+  let path='D:/空白.md';const {handlers,calls}=setup({workspacePath:async(id:string)=>{assert.equal(id,revisionId);return path;}});
+  const opened=value(await handlers.workspace('trusted',revisionId));assert.equal(opened.fileName,loaded.fileName);path='D:/主题/空白.md';await handlers.refresh('trusted',opened.readerId);
+  assert.deepEqual(calls,[{kind:'file',path:'D:/空白.md'},{kind:'file',path:'D:/主题/空白.md'}]);assert.equal((await handlers.workspace('trusted','D:/secret.md')).status,'error');
+});
 test('reader IPC rejects untrusted frames, arbitrary paths and surplus arguments', async () => {
   const { handlers, calls } = setup();
   for (const [action, args] of [['open',[]],['revision',[sourceId,revisionId]],['refresh',['unknown']],['external',['unknown']],['link',['unknown','https://example.com/known']]] as const) assert.equal((await handlers[action]('other', ...args)).status, 'error');

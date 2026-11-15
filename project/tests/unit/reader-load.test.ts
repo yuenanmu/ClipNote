@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdir, mkdtemp, writeFile, unlink, rm, rmdir, symlink } from 'node:fs/promises';
+import { mkdir, mkdtemp, writeFile, readFile, unlink, rm, rmdir, symlink } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { loadReader } from '../../src/modules/reader/load.ts';
@@ -45,4 +45,14 @@ test('archive reading keeps current external edits and uses an archived source a
   assert.deepEqual(opened.archive?.segmentIds, source.segments.map(item => item.segmentId));
   await assert.rejects(loadReader({ ...target, expectedPath: join(f.own, 'different.md') }, f.state), { code: 'READER_UNREADABLE' });
   await unlink(saved.sourcePath); await assert.rejects(loadReader(target, f.state), { code: 'READER_UNREADABLE' });
+});
+test('legacy generated citations are hidden in the reader without modifying the file or authored links', async t => {
+  const f = await fixture(t), output = join(f.own, 'output'); await mkdir(output);
+  const store = new StorageService(f.state); await store.chooseDirectory(output);
+  const bytes = Buffer.from('原始资料'), document = parseSource(bytes, join(f.own, 'source.txt')); const id = document.segments[0].segmentId;
+  const saved = await store.save({ document, bytes }, '# 初稿', { kind: 'generated-note', sourceRefs: [id] });
+  const text = `# 笔记\n\n## 章节 [↗来源 段落1 · 字符1–2](clipnote-source:${encodeURIComponent(id)})\n\n依据：[段落1 · 字符1–2](clipnote-source:${encodeURIComponent(id)})\n\n- 内容（[段落1 · 字符1–2](clipnote-source:${encodeURIComponent(id)})） [外部链接](https://example.test)\n- 两条（[段落1 · 字符1–2](clipnote-source:${encodeURIComponent(id)})；[段落1 · 字符2–3](clipnote-source:${encodeURIComponent(id)})）\n\n人工依据：保留\n`; await writeFile(saved.notePath, text);
+  const loaded = await loadReader({ kind: 'revision', sourceId: saved.sourceId, revisionId: saved.revisionId }, f.state);
+  const view = JSON.stringify(loaded.content); assert.doesNotMatch(view, /clipnote-source:|↗来源|段落1 · 字符|依据：\[|两条（/); assert.match(view, /人工依据：保留/); assert.match(view, /https:\/\/example.test/); assert.equal(await readFile(saved.notePath, 'utf8'), text);
+  await writeFile(f.path, text); const ordinary = await loadReader({ kind: 'file', path: f.path }, f.state); assert.match(JSON.stringify(ordinary.content), /clipnote-source:/);
 });

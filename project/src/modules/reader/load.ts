@@ -9,7 +9,7 @@ import { ReaderError } from './errors.ts';
 import { MAX_READER_BYTES, parseMarkdown } from './parse.ts';
 export async function loadReader(target: ReaderTarget, stateDir: string): Promise<LoadedReader> {
   try {
-    let path: string, archive: LoadedReader['archive'], noteModified: boolean | undefined;
+    let path: string, archive: LoadedReader['archive'], noteModified: boolean | undefined, generated = false;
     if (target.kind === 'file') path = resolve(target.path);
     else {
       const opened = await new StorageService(stateDir).open(target.sourceId, target.revisionId);
@@ -17,6 +17,7 @@ export async function loadReader(target: ReaderTarget, stateDir: string): Promis
       if (target.expectedPath && resolve(target.expectedPath) !== path) throw new ReaderError('READER_UNREADABLE');
       archive = { sourceId: target.sourceId, revisionId: target.revisionId, sourceFile: basename(opened.revision.sourcePath), segmentIds: opened.snapshot.document.segments.map(item => item.segmentId) };
       noteModified = opened.revision.noteModified;
+      generated = opened.revision.kind === 'generated-note';
     }
     if (extname(path).toLowerCase() !== '.md') throw new ReaderError('READER_INVALID_REQUEST');
     await checkedDirectory(dirname(path));
@@ -26,6 +27,6 @@ export async function loadReader(target: ReaderTarget, stateDir: string): Promis
     const bytes = await readBytes(path, MAX_READER_BYTES);
     let decoded;
     try { decoded = decodeSourceBytes(bytes); } catch { throw new ReaderError('READER_ENCODING'); }
-    return { fileName: basename(path), filePath: path, checksum: digest(bytes), encoding: decoded.encoding, content: parseMarkdown(decoded.rawText), ...(archive ? { archive, noteModified } : {}) };
+    return { fileName: basename(path), filePath: path, checksum: digest(bytes), encoding: decoded.encoding, content: parseMarkdown(decoded.rawText, generated ? archive?.segmentIds : undefined), ...(archive ? { archive, noteModified } : {}) };
   } catch (error) { throw error instanceof ReaderError ? error : new ReaderError('READER_UNREADABLE'); }
 }

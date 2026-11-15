@@ -1,0 +1,23 @@
+import {randomBytes} from 'node:crypto';
+import {execFileSync} from 'node:child_process';
+import {mkdir,unlink,writeFile} from 'node:fs/promises';
+import {dirname,join,resolve} from 'node:path';
+import {fileURLToPath} from 'node:url';
+import {buildBundledExperiment} from './build-bundled-experiment.mjs';
+import {assembleBundledExperiment} from './assemble-bundled-experiment.mjs';
+import {buildProvenance} from './build-provenance.mjs';
+
+if(process.platform!=='win32')throw new Error('Windows packaging must run on Windows.');
+const root=resolve(dirname(fileURLToPath(import.meta.url)),'..');
+const built=await buildBundledExperiment(),parent=resolve(root,'../.local/releases');
+await mkdir(parent,{recursive:true});
+const output=join(parent,`ClipNote-candidate-${randomBytes(8).toString('hex')}`);
+await assembleBundledExperiment({runtimeDir:join(root,'node_modules/electron/dist'),buildDir:built.output,projectRoot:root,outputDir:output});
+const resourceDir=join(root,'tools/windows'),object=join(output,'clipnote-res.o'),library=join(output,'clipnote-res.dll');
+execFileSync('windres',['clipnote.rc','-O','coff','-o',object],{cwd:resourceDir});
+execFileSync('gcc',['-shared',object,'-o',library]);
+execFileSync('powershell.exe',['-NoProfile','-File',join(resourceDir,'update-identity.ps1'),'-Source',library,'-Target',join(output,'ClipNote.exe')]);
+await unlink(object);await unlink(library);
+const info=await buildProvenance(root,join(output,'ClipNote.exe'));
+await writeFile(join(output,'build-info.json'),JSON.stringify({...info,bundling:'internal-experiment',npmNoticeCount:built.noticeCount},null,2));
+console.log(`Internal candidate: ${output}`);

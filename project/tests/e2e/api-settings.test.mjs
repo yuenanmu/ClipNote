@@ -21,7 +21,7 @@ test('API settings save an encrypted key and only send a synthetic test when exp
   const env = { ...process.env, CLIPNOTE_TEST_USER_DATA: join(own, 'profile') }; delete env.ELECTRON_RUN_AS_NODE; let app;
   const launch = async () => { app = await electron.launch({ executablePath: electronPath, args: [fileURLToPath(new URL('../../dist/main/index.cjs', import.meta.url))], env, timeout: 30000 }); const page = await app.firstWindow(); page.setDefaultTimeout(8000); return page; };
   t.after(async () => { if (app) await app.close(); await new Promise(resolve => { server.closeAllConnections(); server.close(resolve); }); assert.equal(resolve(dirname(own)), resolve(artifacts)); rmSync(own, { recursive: true, force: true }); });
-  let page = await launch(); await page.getByRole('button', { name: 'API 设置', exact: true }).click();
+  let page = await launch(); await page.getByRole('button', { name: '设置', exact: true }).click();
   assert.equal(await page.getByRole('button', { name: '返回文件工作台' }).count(), 1);
   await page.getByLabel('服务地址').fill('https://platform.deepseek.com'); await page.getByRole('button', { name: '使用 API 地址' }).click(); assert.equal(await page.getByLabel('服务地址').inputValue(), 'https://api.deepseek.com');
   await page.getByLabel('服务地址').fill(base); await page.getByLabel('API 密钥').fill(secret);
@@ -31,7 +31,7 @@ test('API settings save an encrypted key and only send a synthetic test when exp
   await page.getByRole('button', { name: '保存设置', exact: true }).click(); await page.getByText('设置已安全保存', { exact: true }).waitFor();
   assert.equal(calls, 0); assert.equal((await page.evaluate(() => window.clipnote.apiState())).value.configured, true); assert.ok(!JSON.stringify(await page.evaluate(() => window.clipnote.apiState())).includes(secret));
   assert.ok(!readFileSync(join(own, 'profile', 'api', 'api.json'), 'utf8').includes(secret));
-  await app.close(); app = undefined; page = await launch(); await page.getByRole('button', { name: 'API 设置', exact: true }).click();
+  await app.close(); app = undefined; page = await launch(); await page.getByRole('button', { name: '设置', exact: true }).click();
   await page.waitForFunction(expected => document.querySelector('input[aria-label="服务地址"]')?.value === expected, base);
   assert.equal(await page.getByLabel('服务地址').inputValue(), base); assert.equal(await page.getByLabel('API 密钥').inputValue(), ''); assert.equal(calls, 0);
   await page.getByRole('button', { name: '获取模型列表' }).click(); await page.getByLabel('选择模型').waitFor(); assert.equal(modelCalls, 2); assert.equal(calls, 0);
@@ -52,7 +52,7 @@ test('legacy synchronous ciphertext remains readable with asynchronous safeStora
   app = await launch(); const encryptedKey = await app.evaluate(({ safeStorage }, value) => safeStorage.encryptString(value).toString('base64'), secret); await app.close(); app = undefined;
   const apiDir = join(own, 'profile', 'api'); mkdirSync(apiDir, { recursive: true }); writeFileSync(join(apiDir, 'api.json'), JSON.stringify({ version: 1, baseUrl, model: 'fixture', contextWindow: 8192, maxTokens: 2048, encryptedKey }));
   app = await launch(); let stderr = ''; const stream = app.process().stderr; assert.ok(stream, 'Electron stderr must be observable'); stream.on('data', chunk => { stderr += chunk.toString(); });
-  const page = await app.firstWindow(); page.setDefaultTimeout(8000); await page.getByRole('button', { name: 'API 设置', exact: true }).click();
+  const page = await app.firstWindow(); page.setDefaultTimeout(8000); await page.getByRole('button', { name: '设置', exact: true }).click();
   await page.waitForFunction(expected => document.querySelector('input[aria-label="服务地址"]')?.value === expected, baseUrl);
   await page.getByRole('button', { name: '获取模型列表' }).click(); await page.getByLabel('选择模型').waitFor(); assert.equal(auth, `Bearer ${secret}`);
   assert.equal(JSON.parse(readFileSync(join(apiDir, 'api.json'), 'utf8')).encryptedKey, encryptedKey);

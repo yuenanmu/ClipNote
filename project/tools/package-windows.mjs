@@ -1,0 +1,26 @@
+import {cp,mkdir,mkdtemp,readFile,writeFile,rename,readdir} from 'node:fs/promises';
+import {resolve,join,relative,isAbsolute,dirname} from 'node:path';
+import {execFileSync} from 'node:child_process';
+import {buildProvenance} from './build-provenance.mjs';
+if(process.platform!=='win32')throw new Error('Windows packaging must run on Windows.');
+const root=process.cwd(),outRoot=resolve(root,'../.local/releases');
+execFileSync(process.execPath,['tools/build-desktop.mjs'],{cwd:root,stdio:'inherit'});await mkdir(outRoot,{recursive:true});
+const output=await mkdtemp(join(outRoot,'ClipNote-candidate-'));const electron=resolve(root,'node_modules/electron/dist');await cp(electron,output,{recursive:true});
+await rename(join(output,'electron.exe'),join(output,'ClipNote.exe'));
+const resourceDir=resolve(root,'tools/windows'),object=join(output,'clipnote-res.o'),library=join(output,'clipnote-res.dll');
+execFileSync('windres',['clipnote.rc','-O','coff','-o',object],{cwd:resourceDir});execFileSync('gcc',['-shared',object,'-o',library]);
+execFileSync('powershell.exe',['-NoProfile','-File',join(resourceDir,'update-identity.ps1'),'-Source',library,'-Target',join(output,'ClipNote.exe')]);
+const {unlink}=await import('node:fs/promises');await unlink(object);await unlink(library);
+const app=join(output,'resources','app');await mkdir(app,{recursive:true});await cp(resolve(root,'dist'),join(app,'dist'),{recursive:true});
+await writeFile(join(app,'package.json'),JSON.stringify({name:'clipnote',productName:'ClipNote',version:'0.1.0-candidate',main:'dist/main/index.cjs'},null,2));
+const npmCli=process.env.npm_execpath ?? join(dirname(process.execPath),'node_modules','npm','bin','npm-cli.js');
+const paths=execFileSync(process.execPath,[npmCli,'ls','--omit=dev','--all','--parseable'],{cwd:root,encoding:'utf8'}).split(/\r?\n/).slice(1).filter(Boolean);
+const inventory=new Map(),missingNotices=new Map();
+for(const path of paths){const rel=relative(root,path);if(isAbsolute(rel)||rel.startsWith('..')||!rel.startsWith('node_modules'))throw new Error('Unexpected dependency path');await cp(path,join(app,rel),{recursive:true,force:true});try{const dep=JSON.parse(await readFile(join(path,'package.json'),'utf8'));const key=`${dep.name}@${dep.version}`;inventory.set(key,dep.license??dep.licenses??'UNKNOWN');if(!(await readdir(path)).some(name=>/^(licen[sc]e|copying|notice)(\.|$)/i.test(name)))missingNotices.set(key,dep.license??dep.licenses??'UNKNOWN');}catch{throw new Error('Cannot read dependency metadata: '+rel);}}
+await cp(resolve(root,'../docs/Windows候选使用说明.md'),join(output,'使用说明.md'));
+const notices=join(output,'licenses');await mkdir(notices);await cp(resolve(root,'vendor/siwc/LICENSE'),join(notices,'SIWC-LICENSE.txt'));await cp(resolve(root,'vendor/siwc/THIRD_PARTY_NOTICES.md'),join(notices,'SIWC-THIRD-PARTY.md'));await cp(resolve(root,'licenses/SIWC-CHANGES.md'),join(notices,'SIWC-CHANGES.md'));await cp(resolve(root,'licenses/pi-1.4.0-MIT.txt'),join(notices,'pi-1.4.0-MIT.txt'));await cp(resolve(root,'licenses/aws-apache-2.0.txt'),join(notices,'aws-apache-2.0.txt'));await cp(resolve(root,'licenses/aws-sdk-v3-7c2f089-LICENSE.txt'),join(notices,'aws-sdk-v3-7c2f089-LICENSE.txt'));await cp(resolve(root,'licenses/format-upstream-MIT.md'),join(notices,'format-upstream-MIT.md'));await writeFile(join(notices,'production-dependencies.json'),JSON.stringify(Object.fromEntries([...inventory].sort()),null,2));await writeFile(join(notices,'unresolved-notices.json'),JSON.stringify(Object.fromEntries([...missingNotices].sort()),null,2));
+await cp(resolve(root,'licenses/standardwebhooks-a7d19b-LICENSE.txt'),join(notices,'standardwebhooks-a7d19b-LICENSE.txt'));
+await cp(resolve(root,'vendor/siwc/src'),join(notices,'siwc-modified-source'),{recursive:true});
+await writeFile(join(output,'build-info.json'),JSON.stringify(await buildProvenance(root,join(output,'ClipNote.exe')),null,2));
+await writeFile(join(output,'内部候选-不可分发.txt'),'此目录仅用于开发测试。依赖许可证、目标电脑与真实服务验收尚未完成，请勿分发。\n','utf8');
+console.log(output);
