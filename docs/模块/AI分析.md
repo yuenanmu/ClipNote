@@ -2,7 +2,7 @@
 
 ## 职责与边界
 
-复用 pi-ai 的服务适配和登录/刷新能力，提供 API 与 ChatGPT 订阅两条文本分析路径。将来源规划为请求，得到结构化章节、校验引用并生成 Markdown。
+API 使用 pi-ai，ChatGPT 订阅使用 DevKit 登录和请求能力，提供两条文本分析路径。将来源规划为请求，得到结构化章节、校验引用并生成 Markdown。
 
 不自行发明 AI 协议，不下载视频或转写音频，不把订阅通路当 SmartSub 识别后端；不决定用户保存路径、不向来源补充外部知识。
 
@@ -11,7 +11,7 @@
 - 输入：SourceDocument、Profile、提示词版本、取消信号与已有分块检查点。
 - 输出：ChunkPlan、NoteOutline、带归属的 GenerationAttempt，最终 Markdown 与引用元数据。
 - 来源由 [M02](文件来源.md)/[M03](SmartSub适配.md) 生产；凭据保护及登录交互依赖 [M01](桌面壳与公共契约.md)；由 [M07](任务协调与恢复.md) 调度，结果交 [M05](本地存储与版本.md)。
-- 实际位置：`project/src/modules/analysis/`；公共类型在 `project/src/contracts/analysis.ts`。当前实现是可注入服务返回接口的离线核心，真实 API/订阅适配和桌面入口分别在 T07/T08/T09 接入。
+- 实际位置：`project/src/modules/analysis/`；公共类型在 `project/src/contracts/analysis.ts`。当前包含离线核心、API 和订阅适配及桌面入口；真实验收缺口见任务清单。
 
 ## 分析契约
 
@@ -36,13 +36,13 @@ T06 输出适配通用 Mindmap：标题表示章节，嵌套列表表达论点/�
 
 ## 服务与鉴权
 
-API 地址/模型/密钥可配置；首版优先 OpenAI 兼容通路，其他协议经正式适配后再标支持。订阅研究基线采用新 openaiProvider，复用 pi-ai 的 OAuth，不混用旧示例或复制其他应用凭据。
+API 地址/模型/密钥可配置；首版优先 OpenAI 兼容通路，其他协议经正式适配后再标支持。订阅使用 DevKit OAuth 与 Responses 接入，不复制其他应用凭据。
 
 服务类型已确认，不要求用户先研究账号资格。登录、权限、配额和真实文本请求由后续程序验证；需要人工时仅完成正常登录或 App 内配置。库文档证明有能力，不能代替 Electron 内实际请求。
 
 API 与订阅分别配置和验收，参数差异由适配层处理。失败暂停，手动切换服务创建新尝试，来源可复用；不同尝试结果保留明确归属，不暗中换服务或扩大费用。
 
-T07新增 `src/modules/api/`：`ApiConfigStore` 经系统加密保存密钥，`createApiAdapter` 用 pi-ai OpenAI Chat Completions发起单块请求，`analyzeWithApi` 注入 T06并将服务地址哈希纳入计划归属。禁用自动重试与重定向，固定错误类别；传输响应最多4 MiB并约束最终文本大小。输入按配置的上下文窗口、输出上限、协议余量和实际UTF-8请求大小作保守限制，但无法保证任意模型tokenizer完全一致。部分兼容服务不支持SDK默认请求参数，真实兼容性待验。当前T07有设置与显式合成连接测试，文件到笔记UI留T09；检查点仍仅内存保存。
+T07新增 `src/modules/api/`：`ApiConfigStore` 经系统加密保存密钥，`createApiAdapter` 用 pi-ai OpenAI Chat Completions发起单块请求，`analyzeWithApi` 注入 T06并将服务地址哈希纳入计划归属。禁用自动重试与重定向，固定错误类别；传输响应最多4 MiB并约束最终文本大小。输入按配置的上下文窗口、输出上限、协议余量和实际UTF-8请求大小作保守限制，但无法保证任意模型tokenizer完全一致。部分兼容服务不支持SDK默认请求参数，真实兼容性待验。当前已有设置、连接测试与文件到笔记 UI；检查点仍仅内存保存。
 
 API设置新增主动模型发现：向用户指定地址发送认证GET /models，不发送来源文本，允许用户选择返回的模型ID或手动输入。只对同一已保存地址复用其已保存密钥，更换地址清空未保存输入；请求不跟随重定向。HTTP402与429分别提示余额及频率/网关限制，具体服务可能有自己的含义，不以429断言余额不足。
 

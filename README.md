@@ -4,7 +4,7 @@ ClipNote 是开发中的 Windows 桌面 App，目标是把视频字幕或已有�
 
 首版设计支持 SRT、VTT、TXT、MD 导入，API 与 ChatGPT 订阅两种 AI 连接，以及可选 SmartSub 来源。SmartSub 接入也属于首版交付要求；文件分析和本地阅读可独立使用。Obsidian 只是可选外部编辑器。
 
-当前已有文件工作台、归档版本和独立“笔记”区。可导入 SRT/VTT/TXT/MD 核对来源并保存独立版本；已有 MD 可加入持久列表，切换多个文件和归档笔记。每份笔记可选 Markdown、Markmap 脑图或可拖动比例的双栏对照：正文保留折叠大纲，脑图直接显示标题、列表和段落，按章节展开、保留完整文字，并可联动定位原文。原文件保持原位，移出列表只移除登记。导入、归档与阅读均在本地进行，无需 AI 登录、SmartSub 或 Obsidian；AI 笔记生成与安装包属于后续任务。
+当前已有文件工作台、归档版本和独立“笔记”区。可导入 SRT/VTT/TXT/MD 核对来源并保存独立版本；已有 MD 可加入持久列表，切换多个文件和归档笔记。每份笔记可选 Markdown、Markmap 脑图或可拖动比例的双栏对照：正文保留折叠大纲，脑图直接显示标题、列表和段落，按章节展开、保留完整文字，并可联动定位原文。原文件保持原位，移出列表只移除登记。导入、归档与阅读均在本地进行，无需 AI 登录、SmartSub 或 Obsidian；AI 整理和 Windows 候选包已实现；验收缺口见任务清单。
 
 已安装依赖时，在 `project/` 中执行 `npm.cmd run build`，再执行 `npm.cmd start` 即可打开窗口。首次准备与所有验证命令见 [project/README](project/README.md)；可用[合成字幕](project/tests/fixtures/示例%20字幕.srt)试用。任务授权与实际进度统一见[任务清单](docs/任务清单.md)。
 
@@ -20,9 +20,9 @@ ClipNote 是开发中的 Windows 桌面 App，目标是把视频字幕或已有�
 
 ## 当前阶段
 
-T04 经用户实际试用认可，已于2026-10-27合入本地 main（b1b5880）。随后按用户指示在 feat/reader 开发 T05 本地 Markdown 阅读器，该分支尚未合入 main。当前“保存来源”仍生成原文归档，尚未进行 AI 整理。API 与 B 电脑官方登录真实验证继续延后；B 的 SmartSub3.10.1 自带 CLI 帮助可用，真实任务/字幕链仍未验证。T06 及后续任务另行选择；本次未推送远程。
+用户于 2026-11-17 确认第一版开发和 Windows 打包完成。订阅候选和 Windows 打包已合入 main；v0.1.0-candidate 为第一版候选标签。真实服务质量、登录生命周期和跨电脑等验收缺口见[任务清单](docs/任务清单.md)。第二版方向见[开发计划](docs/第二版开发计划.md)。
 
-技术路线采用 Electron、React、TypeScript 与 pi-ai，SmartSub 通过 CLI 适配。T02 曾在 A 电脑完成一次订阅文本请求；B 的本地运行环境和桌面功能已建立，官方登录仍待可用网络。API、完整登录生命周期、SmartSub 实际任务与打包仍需真实验收。
+技术路线采用 Electron、React、TypeScript；API 使用 pi-ai，订阅使用 DevKit，SmartSub 通过 CLI 适配。
 
 本地来源、生成笔记、模型、运行时和凭据不进入 Git；仅保存必要的公开或合成验证资料。
 
