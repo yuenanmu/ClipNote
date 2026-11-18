@@ -5,6 +5,12 @@ import {setSubscriptionTransport} from '../../vendor/siwc/src/transport.ts';
 import {parseSource} from '../../src/modules/source/parser.ts';
 import {analyzeSubscription} from '../../src/modules/subscription/analyze.ts';
 const sse=(events:unknown[])=>new Response(events.map(event=>'data: '+JSON.stringify(event)+'\n\n').join(''),{status:200,headers:{'Content-Type':'text/event-stream'}});
+test('subscription rate limit is returned without retry or private response details',async()=>{
+ let requests=0;
+ setSubscriptionTransport(async()=>{requests++;return Response.json({error:{message:'private server detail'}},{status:429});});
+ await assert.rejects(streamResponse('synthetic-token',{model:'fixture',input:'source'},new AbortController().signal),(error:any)=>error.status===429 && !JSON.stringify(error).includes('private server detail'));
+ assert.equal(requests,1);
+});
 test('subscription first output deadline ignores whitespace',async()=>{
  setSubscriptionTransport(async()=>new Response(new ReadableStream({start(controller){controller.enqueue(new TextEncoder().encode('data: '+JSON.stringify({type:'response.output_text.delta',delta:' '})+'\n\n'));setTimeout(()=>{try{controller.close();}catch{}},200);}}),{headers:{'Content-Type':'text/event-stream'}}));
  await assert.rejects(streamResponse('synthetic-token',{model:'fixture',input:'source',deadline:{firstOutputMs:50,idleMs:50,requestMs:500}},new AbortController().signal),(error:any)=>error.code==='FIRST_OUTPUT_TIMEOUT');

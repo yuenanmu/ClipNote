@@ -65,6 +65,18 @@ test('API ignores response headers arriving after cancellation', async t => {
     assert.ok(!phases.includes('headers'));
   }finally{mock.mock.restore();}
 });
+test('API ignores valid output arriving after the first output deadline', async t => {
+  await import('@earendil-works/pi-ai');await import('@earendil-works/pi-ai/api/openai-completions.lazy');
+  const phases:string[]=[];
+  const body=`data: ${JSON.stringify({id:'fixture',object:'chat.completion.chunk',model:profile.model,choices:[{index:0,delta:{content:'late private'},finish_reason:null}]})}\n\ndata: [DONE]\n\n`;
+  const mock=t.mock.method(globalThis,'fetch',async()=>{await new Promise(resolve=>setTimeout(resolve,250));return new Response(body,{status:200,headers:{'content-type':'text/event-stream'}});});
+  try{
+    const adapter=createApiAdapter(credentials('http://127.0.0.1:1/v1'),{firstOutputMs:60,idleMs:60,requestMs:500},undefined,phase=>phases.push(phase));
+    await assert.rejects(adapter({chunk:{chunkId:'test',index:0,core:[],context:[],request:'synthetic'},profile,repair:false}),(error:any)=>error.code==='FIRST_OUTPUT_TIMEOUT');
+    await new Promise(resolve=>setTimeout(resolve,300));
+    assert.deepEqual(phases,['request']);
+  }finally{mock.mock.restore();}
+});
 test('API diagnostics distinguish response headers and meaningful text', async t => {
   const phases:string[]=[];
   const base=await server(t,(_req,res)=>{
