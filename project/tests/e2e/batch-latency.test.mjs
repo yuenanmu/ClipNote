@@ -93,6 +93,7 @@ test('duplicate files reuse one request with live progress, independent saves an
   assert.equal(calls,5);assert.match(readFileSync(join(notes,'c.md'),'utf8'),/测试内容/);
   const previous=await page.evaluate(()=>window.clipnote.organizationList());
   const previousIds=new Set(previous.value.map(item=>item.id));
+  const existingNotes=names.map(name=>readFileSync(join(notes,name.replace('.txt','.md')),'utf8'));
   await panel.getByRole('button',{name:'检查所选文件'}).click();await panel.getByRole('button',{name:'确认发送并开始'}).click();
   await panel.getByText(/等待服务响应 ·/).first().waitFor();
   await panel.getByRole('button',{name:'停止批量整理'}).click();
@@ -106,4 +107,9 @@ test('duplicate files reuse one request with live progress, independent saves an
   assert.equal(cancelled.events.filter(event=>['succeeded','failed','cancelled'].includes(event.phase)).length,1);
   assert.ok(!cancelled.events.some(event=>event.phase==='saving'));
   assert.doesNotMatch(JSON.stringify(cancelled),/same 😀 content|synthetic/);
+  await page.waitForTimeout(1500);
+  for(const [index,name] of names.entries())assert.equal(readFileSync(join(notes,name.replace('.txt','.md')),'utf8'),existingNotes[index]);
+  const afterCancel=await page.evaluate(id=>window.clipnote.organizationGet(id),cancelled.id);
+  assert.equal(afterCancel.value.status,'cancelled');
+  assert.equal(afterCancel.value.events.filter(event=>['succeeded','failed','cancelled'].includes(event.phase)).length,1);
 });

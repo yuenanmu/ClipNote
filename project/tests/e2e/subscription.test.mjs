@@ -66,6 +66,9 @@ test('subscription diagnostics follow the real desktop task through saving',{tim
  await panel.getByRole('button',{name:'停止',exact:true}).click();
  let cancelled;for(let i=0;i<100 && !cancelled;i++){data=await page.evaluate(()=>window.clipnote.organizationList());cancelled=data.value.find(record=>record.service==='subscription'&&record.status==='cancelled');if(!cancelled)await new Promise(resolve=>setTimeout(resolve,100));}
  assert.ok(cancelled,'cancelled task was not recorded');assert.equal(cancelled.events.filter(event=>['succeeded','failed','cancelled'].includes(event.phase)).length,1);assert.doesNotMatch(JSON.stringify(cancelled),/partial private|synthetic-restart-secret/);
+ await page.waitForTimeout(600);
+ assert.match(readFileSync(join(notes,'sample.md'),'utf8'),/合成要点/);
+ assert.equal((await page.evaluate(()=>window.clipnote.savedResults())).value.length,0);
 });
 
 test('subscription settings and file confirmation use safe synthetic services',{timeout:60000},async t=>{
