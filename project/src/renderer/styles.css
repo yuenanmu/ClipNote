@@ -232,7 +232,16 @@ svg { flex-shrink: 0; }
 .batch-confirm li>em { color:#a26d36; font-style:normal; }
 .batch-item { display:flex; gap:9px; padding:10px 0; border-bottom:1px solid #e8eee9; }
 .batch-item b { font-weight:500; }.batch-item span { margin-left:16px; color:#82968a; font-size:11px; }.batch-item.failed span {color:#a55e45;}.batch-item.succeeded span {color:#418465;}
-.batch-item p { color:#526b60; margin:6px 0; font-size:11px; }.batch-item.failed p {color:#a36b51;}.batch-item small {display:block;margin-top:6px;color:#657d6d;}
+.batch-item > div { flex:1; min-width:0; }
+.batch-item small { display:block; margin-top:6px; color:#526b60; }
+.organization-status { display:grid; gap:8px; margin:8px 0; color:#244c41; font-size:14px; }
+.organization-status strong { font-weight:600; }
+.organization-status p { margin:0; color:inherit; line-height:1.5; }
+.organization-status p[role="alert"] { color:#914b33; }
+.organization-status details { color:#526b60; }
+.organization-status summary { width:fit-content; cursor:pointer; }
+.organization-status progress, .batch-progress progress { display:block; width:min(100%, 320px); height:10px; accent-color:#27695a; }
+.batch-progress { display:grid; gap:6px; margin-bottom:8px; }
 .pending-results>div { display:flex; justify-content:space-between; align-items:center; gap:15px; margin:6px 0; }.batch-message {line-height:1.8;}
 .archive-panel {width:min(780px,95vw);}.archive-panel header p {margin:0 0 18px;color:#809386;}
 .archive-list {max-height:48vh;overflow:auto;margin-top:15px;}.archive-entry {display:flex;justify-content:space-between;gap:16px;width:100%;border:0;border-bottom:1px solid #e2eae3;background:transparent;padding:13px 6px;color:#375244;text-align:left;}

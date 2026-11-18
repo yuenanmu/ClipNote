@@ -48,18 +48,24 @@ test('duplicate files reuse one request with live progress, independent saves an
   const panel=page.getByRole('region',{name:'批量整理'});await panel.getByRole('button',{name:'批量整理（4）'}).click();await panel.getByRole('button',{name:'选择笔记文件夹'}).click();await pick(notes);
   const picker=page.getByRole('dialog',{name:'选择笔记保存位置'});await picker.getByRole('button',{name:'打开笔记文件夹'}).click();await picker.getByRole('button',{name:'使用此文件夹'}).click();
   await panel.getByRole('button',{name:'检查所选文件'}).click();await panel.getByRole('button',{name:'确认发送并开始'}).click();
-  await panel.getByText(/等待服务响应 ·/).waitFor();await page.screenshot({path:join(base,'batch-latency-waiting.png')});
-  await panel.getByLabel('整理阶段').getByText(/等待首个有效输出/).waitFor();
-  await panel.getByLabel('整理阶段').getByText(/单次请求最多 600 秒，首个有效输出等待上限 120 秒，输出停滞上限 60 秒/).waitFor();
-  await panel.getByText(/本份资料处理上限 180 秒/).waitFor();
-  const waitingText=await panel.getByLabel('整理阶段').innerText();
+
+  await panel.getByLabel('整理阶段').getByRole('status').getByText('等待首个有效输出',{exact:true}).waitFor();
+  const active = panel.locator('.batch-item.running').getByLabel('整理阶段');
+  await active.getByRole('progressbar').waitFor();
+  assert.equal(await active.getByRole('progressbar').getAttribute('value'), null);
+  assert.equal(await active.locator('details').getAttribute('open'), null);
+  await page.screenshot({path:join(base,'batch-latency-waiting.png')});
+  await active.getByText('详细信息').focus();
+  await active.getByText('详细信息').press('Enter');
+  await active.getByText(/单请求上限 600 秒/).waitFor();
+
+  const waitingText=await active.getByText(/已用/).innerText();
   await page.waitForTimeout(600);
-  assert.notEqual(await panel.getByLabel('整理阶段').innerText(),waitingText,'waiting elapsed time should advance');
-  await panel.getByText(/正在接收响应 ·/).waitFor();
-  await panel.getByLabel('整理阶段').getByText(/正在接收正文/).waitFor();
+  assert.notEqual(await active.getByText(/已用/).innerText(),waitingText,'waiting elapsed time should advance');
+  await panel.getByLabel('整理阶段').getByRole('status').getByText('正在接收正文',{exact:true}).waitFor();
   await panel.locator('.batch-item.failed').filter({hasText:'d.txt'}).waitFor();
-  await panel.locator('.batch-item.failed').filter({hasText:'d.txt'}).getByLabel('整理阶段').getByText(/失败 · 上一阶段：正在接收正文/).waitFor();
-  assert.equal(calls,2);assert.equal(await panel.getByText('复用本批相同内容，未重复请求 AI。',{exact:true}).count(),2);
+  await panel.locator('.batch-item.failed').filter({hasText:'d.txt'}).getByLabel('整理阶段').getByText(/连接中断或服务不可用/).waitFor();
+  assert.equal(calls,2);assert.equal(await panel.getByText('已复用本批整理结果。',{exact:true}).count(),2);
   for(const name of ['a','b','c'])assert.match(readFileSync(join(notes,name+'.md'),'utf8'),/测试内容/);
   const state=await page.evaluate(()=>window.clipnote.batchState());
   assert.equal(state.value.items[1].timing.requests,0);assert.equal(state.value.items[2].timing.apiMs,0);
@@ -87,7 +93,7 @@ test('duplicate files reuse one request with live progress, independent saves an
   await panel.locator('.batch-item.succeeded').filter({hasText:'d.txt'}).waitFor();assert.equal(calls,3);
   // A new batch must issue fresh requests. An externally changed duplicate must not reuse old content.
   await panel.getByRole('button',{name:'检查所选文件'}).click();await panel.getByRole('button',{name:'确认发送并开始'}).click();
-  await panel.getByText(/等待服务响应 ·/).first().waitFor();writeFileSync(join(sources,'c.txt'),'external change');
+  await panel.locator('.batch-item.running').getByRole('status').getByText('等待首个有效输出',{exact:true}).waitFor();writeFileSync(join(sources,'c.txt'),'external change');
   await panel.locator('.batch-item.failed').filter({hasText:'c.txt'}).waitFor();
   await panel.locator('.batch-item.succeeded').filter({hasText:'d.txt'}).waitFor();
   assert.equal(calls,5);assert.match(readFileSync(join(notes,'c.md'),'utf8'),/测试内容/);
@@ -95,7 +101,7 @@ test('duplicate files reuse one request with live progress, independent saves an
   const previousIds=new Set(previous.value.map(item=>item.id));
   const existingNotes=names.map(name=>readFileSync(join(notes,name.replace('.txt','.md')),'utf8'));
   await panel.getByRole('button',{name:'检查所选文件'}).click();await panel.getByRole('button',{name:'确认发送并开始'}).click();
-  await panel.getByText(/等待服务响应 ·/).first().waitFor();
+  await panel.locator('.batch-item.running').getByRole('status').getByText('等待首个有效输出',{exact:true}).waitFor();
   await panel.getByRole('button',{name:'停止批量整理'}).click();
   let cancelled;
   for(let i=0;i<100 && !cancelled;i++){

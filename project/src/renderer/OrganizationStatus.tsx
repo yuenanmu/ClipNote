@@ -15,8 +15,12 @@ const reasons:Record<string,string> = {
   authentication:'账户认证失败', permission:'账户没有访问权限', rate_limit:'服务限流或额度不足',
   validation:'内容校验失败', invalid_response:'服务响应无效', unknown:'整理未完成',
 };
+const milestones = {
+  headers:'响应头',
+  first_text:'首次正文', received:'接收结束', validating:'校验', saving:'写盘',
+} as const;
 
-export function OrganizationStatus({id,onStatus}:{id?:string;onStatus?:(status:OrganizationTaskSnapshot['status']|undefined)=>void}) {
+export function OrganizationStatus({id,onStatus,fallback,error,timing}:{id?:string;onStatus?:(status:OrganizationTaskSnapshot['status']|undefined)=>void;fallback?:string;error?:string;timing?:{prepareMs:number;apiMs:number;localMs:number;saveMs:number;requests:number}}) {
   const [snapshot,setSnapshot]=useState<OrganizationTaskSnapshot>();
   const [clock,setClock]=useState(0);
   const observed=useRef({revision:-1,event:'',at:0});
@@ -43,13 +47,26 @@ export function OrganizationStatus({id,onStatus}:{id?:string;onStatus?:(status:O
     const timer=setInterval(()=>void refresh(),500);
     return ()=>{alive=false;clearInterval(timer);};
   },[id,onStatus]);
-  if(!snapshot || snapshot.id!==id)return null;
-  const event=snapshot.events.at(-1);
-  const lastWork=[...snapshot.events].reverse().find(item=>!['failed','cancelled','succeeded'].includes(item.phase));
-  if(!event)return null;
-  return <div aria-label="整理阶段">
-    <p>{labels[event.phase]}{snapshot.status==='failed' && lastWork ? ` · 上一阶段：${labels[lastWork.phase]}` : ''} · 已用 {((snapshot.elapsedMs ?? (event.elapsedMs+(snapshot.status==='running'?Math.max(0,clock-observed.current.at):0)))/1000).toFixed(1)} 秒</p>
-    {snapshot.status==='running' && <small>单次请求最多 {STREAM_DEADLINE_DEFAULTS.requestMs/1000} 秒，首个有效输出等待上限 {STREAM_DEADLINE_DEFAULTS.firstOutputMs/1000} 秒，输出停滞上限 {STREAM_DEADLINE_DEFAULTS.idleMs/1000} 秒。整份资料另有处理上限。</small>}
-    {snapshot.error && <p>{reasons[snapshot.error] ?? '整理未完成'}</p>}
+  const current = snapshot?.id === id ? snapshot : undefined;
+  const event = current?.events.at(-1);
+  const lastWork = current?.events.slice().reverse().find(item=>!['failed','cancelled','succeeded'].includes(item.phase));
+  const phase = event ? labels[event.phase] : fallback;
+  if (!phase) return null;
+  const reason = current?.error ? reasons[current.error] ?? error ?? '整理未完成' : error;
+  const elapsed = current?.elapsedMs ?? (event ? event.elapsedMs + (current?.status === 'running' ? Math.max(0,clock-observed.current.at) : 0) : 0);
+  return <div className="organization-status" aria-label="整理阶段">
+    <div role="status"><strong>{phase}</strong></div>
+    {(current?.status === 'running' || (!current && fallback === '正在整理')) && <progress aria-label="整理进行中" />}
+    {reason && <p role="alert">{reason}</p>}
+    {(event || timing) && <details>
+      <summary>详细信息</summary>
+      {event && <p>已用 {(elapsed/1000).toFixed(1)} 秒 · {current?.requests ?? 0} 次请求{current?.status === 'failed' && lastWork ? ` · 上一阶段：${labels[lastWork.phase]}` : ''}</p>}
+      {current?.status === 'running' && <p>单请求上限 {STREAM_DEADLINE_DEFAULTS.requestMs/1000} 秒，等待首个有效输出 {STREAM_DEADLINE_DEFAULTS.firstOutputMs/1000} 秒，输出停滞 {STREAM_DEADLINE_DEFAULTS.idleMs/1000} 秒。整份资料另有处理上限。</p>}
+      {timing && <p>本次耗时：准备 {(timing.prepareMs/1000).toFixed(1)} 秒 · API {(timing.apiMs/1000).toFixed(1)} 秒 · 校验 {(timing.localMs/1000).toFixed(1)} 秒 · 保存 {(timing.saveMs/1000).toFixed(1)} 秒</p>}
+      {current && <ul>{current.events.flatMap(({phase, elapsedMs}, index) => {
+        const label = milestones[phase as keyof typeof milestones];
+        return label ? [<li key={index}>{label} · {(elapsedMs / 1000).toFixed(1)} 秒</li>] : [];
+      })}</ul>}
+    </details>}
   </div>;
 }
