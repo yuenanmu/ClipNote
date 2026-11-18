@@ -15,7 +15,13 @@ test('duplicate files reuse one request with live progress, independent saves an
   const server=createServer(async(req,res)=>{
     calls++;const bytes=[];for await(const part of req)bytes.push(part);
     const payload=JSON.parse(JSON.parse(Buffer.concat(bytes).toString()).messages.at(-1).content.split('\n')[1]);
-    if(failing && payload.core.some(ref=>ref.text==='different')){res.writeHead(503);res.end();return;}
+    if(failing && payload.core.some(ref=>ref.text==='different')){
+      res.writeHead(200,{'Content-Type':'text/event-stream'});
+      res.write(`data: ${JSON.stringify({id:'fixture',object:'chat.completion.chunk',model:'fixture',choices:[{index:0,delta:{content:'partial private'},finish_reason:null}]})}\n\n`);
+      await new Promise(resolve=>setTimeout(resolve,200));
+      res.destroy();
+      return;
+    }
     await new Promise(resolve=>setTimeout(resolve,1100));
     if(res.destroyed)return;
     const refs=payload.core.map(ref=>ref.refId);
@@ -46,6 +52,23 @@ test('duplicate files reuse one request with live progress, independent saves an
   const state=await page.evaluate(()=>window.clipnote.batchState());
   assert.equal(state.value.items[1].timing.requests,0);assert.equal(state.value.items[2].timing.apiMs,0);
   assert.equal(state.value.items[3].timing.requests,1);assert.ok(state.value.items[3].finishedAt);
+  const diagnostics=await page.evaluate(()=>window.clipnote.organizationList());
+  assert.equal(diagnostics.status,'ok');
+  const success=diagnostics.value.find(item=>item.service==='api' && item.status==='succeeded' && item.events.some(event=>event.phase==='first_text'));
+  const failed=diagnostics.value.find(item=>item.service==='api' && item.status==='failed');
+  assert.ok(success);assert.ok(failed);assert.equal(failed.error,'network');
+  const failedPhases=failed.events.map(event=>event.phase);
+  for(const phase of ['headers','first_text','last_text','failed'])assert.ok(failedPhases.includes(phase),phase);
+  assert.equal(failedPhases.filter(phase=>['succeeded','failed','cancelled'].includes(phase)).length,1);
+  assert.ok(!failedPhases.includes('received'));assert.ok(!failedPhases.includes('saving'));
+  assert.ok(failed.events.every(event=>Number.isFinite(event.elapsedMs)&&event.elapsedMs>=0));
+  assert.doesNotMatch(JSON.stringify(failed),/partial private|synthetic/);
+  const phases=success.events.map(event=>event.phase);
+  for(const phase of ['request','headers','first_text','received','validating','saving','saved','succeeded'])assert.ok(phases.includes(phase),phase);
+  assert.ok(phases.indexOf('headers')<phases.indexOf('first_text'));
+  assert.doesNotMatch(JSON.stringify(diagnostics),/same 😀 content|synthetic|测试内容/);
+  const byId=await page.evaluate(id=>window.clipnote.organizationGet(id),success.id);assert.deepEqual(byId.value,success);
+  assert.equal((await page.evaluate(()=>window.clipnote.organizationGet('invalid'))).status,'error');
   await panel.locator('.batch-item.failed').scrollIntoViewIfNeeded();
   await page.screenshot({path:join(base,'batch-latency-results.png')});
   failing=false;await panel.getByLabel('重试 d.txt').check();await panel.getByRole('button',{name:'重试选中失败项'}).click();
@@ -56,4 +79,19 @@ test('duplicate files reuse one request with live progress, independent saves an
   await panel.locator('.batch-item.failed').filter({hasText:'c.txt'}).waitFor();
   await panel.locator('.batch-item.succeeded').filter({hasText:'d.txt'}).waitFor();
   assert.equal(calls,5);assert.match(readFileSync(join(notes,'c.md'),'utf8'),/测试内容/);
+  const previous=await page.evaluate(()=>window.clipnote.organizationList());
+  const previousIds=new Set(previous.value.map(item=>item.id));
+  await panel.getByRole('button',{name:'检查所选文件'}).click();await panel.getByRole('button',{name:'确认发送并开始'}).click();
+  await panel.getByText(/等待服务响应 ·/).first().waitFor();
+  await panel.getByRole('button',{name:'停止批量整理'}).click();
+  let cancelled;
+  for(let i=0;i<100 && !cancelled;i++){
+    const result=await page.evaluate(()=>window.clipnote.organizationList());
+    cancelled=result.value.find(item=>!previousIds.has(item.id)&&item.service==='api'&&item.status==='cancelled');
+    if(!cancelled)await new Promise(resolve=>setTimeout(resolve,100));
+  }
+  assert.ok(cancelled,'cancelled API diagnostic was not recorded');
+  assert.equal(cancelled.events.filter(event=>['succeeded','failed','cancelled'].includes(event.phase)).length,1);
+  assert.ok(!cancelled.events.some(event=>event.phase==='saving'));
+  assert.doesNotMatch(JSON.stringify(cancelled),/same 😀 content|synthetic/);
 });

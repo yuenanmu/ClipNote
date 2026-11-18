@@ -1,3 +1,4 @@
+import { createOrganizationTasks } from './organization-tasks.ts';
 import { app, BrowserWindow, dialog, ipcMain, shell, safeStorage, session } from 'electron';
 import type { IpcMainInvokeEvent } from 'electron';
 import { mkdirSync } from 'node:fs';
@@ -179,7 +180,16 @@ app.whenReady().then(() => {
   });
   for(const [action,handler] of Object.entries(smartsubTaskHandlers))ipcMain.handle(`smartsub-task:${action}`,handler);
   const results=new NoteResults(join(local,'note-results'),workspace);
-  const subscriptionTask=createSubscriptionTask({trusted,session:()=>subscription.getSession(),models:()=>subscription.listModels(),preview:(id,folder)=>workspace.previewOutput(id,folder),analyze:async(id,plan,profile,model,instructions,signal)=>{const release=workspace.lockPaths([plan.sourcePath,plan.notePath]);try{const source:SourceSnapshot=await tasks.run(join(__dirname,'source-worker.cjs'),{filePath:await workspace.filePath('source',id)});if(plan.sourceChecksum && source.document.checksum!==plan.sourceChecksum)throw new WorkspaceError('CONFLICT');return (await analyzeSubscription(source.document,subscription,profile,model,{signal,instructions})).markdown;}finally{release();}},stage:(plan,markdown)=>results.add(plan,markdown),discard:id=>results.remove(id)});
+  const organizationTasks=createOrganizationTasks();
+  const diagnostic=(service:'api'|'subscription',sourceId:string)=>{
+    const taskId=organizationTasks.start(service,sourceId);
+    return {event:(phase:import('./organization-tasks.ts').DiagnosticPhase,ageMs?:number)=>organizationTasks.event(taskId,{phase,ageMs}),progress:(value:import('../contracts/analysis.ts').AnalysisProgress)=>organizationTasks.progress(taskId,value),
+      finish:(status:'succeeded'|'failed'|'cancelled',error?:string)=>organizationTasks.finish(taskId,status,error),pending:(resultId:string)=>organizationTasks.pending(taskId,resultId)};
+  };
+  ipcMain.handle('organization:list',(event,...args)=>trusted(event) && args.length===0 ? {status:'ok',value:organizationTasks.list()} : {status:'error',error:{code:'FORBIDDEN_REQUEST',message:'请求无效。'}});
+  ipcMain.handle('organization:get',(event,...args)=>trusted(event) && args.length===1 && isUuid(args[0]) ? {status:'ok',value:organizationTasks.get(args[0]) ?? null} : {status:'error',error:{code:'FORBIDDEN_REQUEST',message:'请求无效。'}});
+
+  const subscriptionTask=createSubscriptionTask({trusted,diagnostic:sourceId=>diagnostic('subscription',sourceId),session:()=>subscription.getSession(),models:()=>subscription.listModels(),preview:(id,folder)=>workspace.previewOutput(id,folder),analyze:async(id,plan,profile,model,instructions,signal,onDiagnostic)=>{const release=workspace.lockPaths([plan.sourcePath,plan.notePath]);try{const source:SourceSnapshot=await tasks.run(join(__dirname,'source-worker.cjs'),{filePath:await workspace.filePath('source',id)});if(plan.sourceChecksum && source.document.checksum!==plan.sourceChecksum)throw new WorkspaceError('CONFLICT');return (await analyzeSubscription(source.document,subscription,profile,model,{signal,instructions,onDiagnostic})).markdown;}finally{release();}},stage:(plan,markdown)=>results.add(plan,markdown),discard:id=>results.remove(id)});
   for(const [action,handler] of Object.entries(subscriptionTask))ipcMain.handle(`subscription-task:${action}`,action==='start'?(event,...args)=>guarded(event,'subscription',()=>handler(event,...args)):handler);
   const exporter=new ArchiveExporter(workspace,()=>new StorageService(join(local,'storage')).state());
   const stopWatching=workspace.subscribe(change=>{if(!window.isDestroyed())window.webContents.send('workspace:changed',change);});
@@ -215,23 +225,23 @@ app.whenReady().then(() => {
       return await queuedWorkspace(event,kind,action,args);
     } finally { gateBusy = false; }
   });
-  const workflowHandlers = createWorkflowHandlers({ isTrustedSender: trusted, source: id => snapshots.get(id), credentials: () => apiStore.credentials(),
+  const workflowHandlers = createWorkflowHandlers({ isTrustedSender: trusted, diagnostic:sourceId=>diagnostic('api',sourceId), source: id => snapshots.get(id), credentials: () => apiStore.credentials(),
     hasDirectory: async () => Boolean((await tasks.run(join(__dirname, 'storage-worker.cjs'), { stateDir: join(local, 'storage'), action: 'state', payload: {} }, true)).directory),
     analyze: (source, credentials, options) => runAnalysisWorker(join(__dirname, 'analysis-worker.cjs'), source, credentials, options),
     save: (source, result) => tasks.run(join(__dirname, 'storage-worker.cjs'), { stateDir: join(local, 'storage'), action: 'save-generated', payload: { snapshot: source, markdown: result.markdown, metadata: { kind: 'generated-note', provider: result.attempt.provider, model: result.attempt.model, promptVersion: result.attempt.promptVersion, sourceRefs: result.sourceRefs } } }, true),
     resume: draftId => tasks.run(join(__dirname, 'storage-worker.cjs'), { stateDir: join(local, 'storage'), action: 'resume', payload: { draftId } }, true),
   });
   const batchReuse=new BatchReuse();
-  const batchHandlers = createBatchHandlers({ isTrustedSender: trusted,resetAnalysis:()=>batchReuse.clear(),
+  const batchHandlers = createBatchHandlers({ isTrustedSender: trusted,diagnostic:sourceId=>diagnostic('api',sourceId),resetAnalysis:()=>batchReuse.clear(),
     config: async () => { const value = await apiStore.state(); if (!value.configured) throw new ApiError('INVALID_CONFIG'); return value; },
     preview: (id, target) => workspace.previewOutput(id, target),
-    analyze: async (id, expected, signal,plan,report) => { const credentials = await apiStore.credentials(); if (credentials.baseUrl !== expected.baseUrl || credentials.model !== expected.model) throw new ApiError('INVALID_CONFIG');
+    analyze: async (id, expected, signal,plan,report,onDiagnostic) => { const credentials = await apiStore.credentials(); if (credentials.baseUrl !== expected.baseUrl || credentials.model !== expected.model) throw new ApiError('INVALID_CONFIG');
       const started=performance.now();
       const source:SourceSnapshot = await tasks.run(join(__dirname, 'source-worker.cjs'), { filePath: await workspace.filePath('source', id) });
       if(plan.sourceChecksum && source.document.checksum!==plan.sourceChecksum)throw new WorkspaceError('CONFLICT');
       const prepareMs=performance.now()-started;let metrics:AnalysisMetrics={prepareMs:0,apiMs:0,localMs:0,requests:0};
       const value=await batchReuse.run(source.document,credentials,expected.instructions??'',signal,async(checkpoints)=>{
-        const result=await runAnalysisWorker(join(__dirname, 'analysis-worker.cjs'), source.document, credentials, { signal, checkpoints, instructions: expected.instructions,onProgress:value=>report(value),onMetrics:value=>{metrics=value;report(undefined,{...metrics,prepareMs:prepareMs+metrics.prepareMs,saveMs:0});} });return result.markdown;
+        const result=await runAnalysisWorker(join(__dirname, 'analysis-worker.cjs'), source.document, credentials, { signal, checkpoints, instructions: expected.instructions,onDiagnostic,onProgress:value=>report(value),onMetrics:value=>{metrics=value;report(undefined,{...metrics,prepareMs:prepareMs+metrics.prepareMs,saveMs:0});} });return result.markdown;
       });return {...value,timing:{...metrics,prepareMs:prepareMs+metrics.prepareMs,saveMs:0}}; },
     save: (id, target, plan, markdown) => workspace.writeOutput(id, target, plan, markdown),
     lock:plans=>workspace.lockPaths(plans.flatMap(plan=>[plan.sourcePath,plan.notePath])),
@@ -244,8 +254,9 @@ app.whenReady().then(() => {
     }finally{gateBusy=false;}
   };
   ipcMain.handle('results:list',(event,...args)=>fileAction(event,async()=>{if(args.length)throw new WorkspaceError('INVALID_REQUEST');return results.list();}));
-  ipcMain.handle('results:prepare',(event,...args)=>fileAction(event,async()=>{const [id,folder,name]=args;if(args.length<1 || args.length>3 || !isUuid(id) || (folder!==undefined && !isUuid(folder)) || (name!==undefined && (typeof name!=='string' || name.length>200)))throw new WorkspaceError('INVALID_REQUEST');return results.prepare(id,folder,name);}));
-  ipcMain.handle('results:save',(event,...args)=>fileAction(event,async()=>{if(args.length!==1 || !isUuid(args[0]))throw new WorkspaceError('INVALID_REQUEST');const saved=await results.save(args[0]);await batchHandlers.saved(event,saved.id,saved.path);return null;}));
+  const diagnosticSaveTokens=new Map<string,string>();
+  ipcMain.handle('results:prepare',(event,...args)=>fileAction(event,async()=>{const [id,folder,name]=args;if(args.length<1 || args.length>3 || !isUuid(id) || (folder!==undefined && !isUuid(folder)) || (name!==undefined && (typeof name!=='string' || name.length>200)))throw new WorkspaceError('INVALID_REQUEST');const preview=await results.prepare(id,folder,name);diagnosticSaveTokens.set(preview.token,id);if(diagnosticSaveTokens.size>100)diagnosticSaveTokens.delete(diagnosticSaveTokens.keys().next().value!);return preview;}));
+  ipcMain.handle('results:save',(event,...args)=>fileAction(event,async()=>{if(args.length!==1 || !isUuid(args[0]))throw new WorkspaceError('INVALID_REQUEST');const resultId=diagnosticSaveTokens.get(args[0]);if(resultId)organizationTasks.saveStarted(resultId);let saved;try{saved=await results.save(args[0]);}catch(error){if(resultId)organizationTasks.saveFailed(resultId);throw error;}if(resultId){organizationTasks.saveFinished(resultId);diagnosticSaveTokens.delete(args[0]);}await batchHandlers.saved(event,saved.id,saved.path);return null;}));
   ipcMain.handle('archive:preview',(event,...args)=>fileAction(event,async()=>{if(args.length!==1 || !isUuid(args[0]))throw new WorkspaceError('INVALID_REQUEST');return exporter.preview(args[0]);}));
   ipcMain.handle('archive:export',(event,...args)=>fileAction(event,async()=>{const [folder,selected]=args;if(args.length!==2 || !isUuid(folder) || !Array.isArray(selected) || !selected.length || selected.length>1000 || selected.some(item=>!item || !isUuid(item.id) || typeof item.name!=='string' || item.name.length>200))throw new WorkspaceError('INVALID_REQUEST');return exporter.export(folder,selected);}));
   async function isJobActive(event: unknown): Promise<boolean> {
@@ -284,7 +295,7 @@ app.whenReady().then(() => {
     for(const action of ['state','choose','openOfficial'])ipcMain.removeHandler(`smartsub:${action}`);
     for(const action of Object.keys(smartsubTaskHandlers))ipcMain.removeHandler(`smartsub-task:${action}`);
     stopWatching();
-    for(const channel of ['results:list','results:prepare','results:save','archive:preview','archive:export'])ipcMain.removeHandler(channel);
+    for(const channel of ['organization:list','organization:get','results:list','results:prepare','results:save','archive:preview','archive:export'])ipcMain.removeHandler(channel);
     ipcMain.removeHandler('source:import');
     for (const action of Object.keys(storageHandlers)) ipcMain.removeHandler(`storage:${action}`);
     for (const action of Object.keys(readerHandlers)) ipcMain.removeHandler(`reader:${action}`);

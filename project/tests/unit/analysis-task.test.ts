@@ -6,7 +6,38 @@ import {join} from 'node:path';
 import {createServer} from 'node:http';
 import {fileURLToPath} from 'node:url';
 import {runAnalysisWorker} from '../../src/main/analysis-task.ts';
+import {createDiagnosticEmitter} from '../../src/modules/analysis/diagnostic-emitter.ts';
 import {parseSource} from '../../src/modules/source/parser.ts';
+test('diagnostic emitter coalesces rapid output and flushes before the next phase',()=>{
+  let now=0;const events:string[]=[];
+  const emit=createDiagnosticEmitter(phase=>events.push(phase),()=>now);
+  emit('request');emit('first_text');emit('last_text');
+  for(let i=0;i<100;i++){now++;emit('last_text');}
+  assert.deepEqual(events,['request','first_text','last_text']);
+  emit('received');assert.deepEqual(events,['request','first_text','last_text','last_text','received']);
+});
+test('diagnostic emitter flushes pending output while the response is stalled',async()=>{
+  const events:string[]=[];
+  const emit=createDiagnosticEmitter(phase=>events.push(phase),()=>performance.now(),15);
+  emit('last_text');emit('last_text');
+  await new Promise(resolve=>setTimeout(resolve,40));
+  assert.deepEqual(events,['last_text','last_text']);
+  emit('received');
+});
+test('diagnostic emitter reports how old the last coalesced output is',()=>{
+  let now=0;const events:Array<[string,number|undefined]>=[];
+  const emit=createDiagnosticEmitter((phase,age)=>events.push([phase,age]),()=>now);
+  emit('last_text');now=50;emit('last_text');now=200;emit('received');
+  assert.deepEqual(events,[['last_text',0],['last_text',150],['received',0]]);
+});
+test('worker diagnostic phases are delivered without worker payloads',async t=>{
+  const own=await mkdtemp(join(tmpdir(),'clipnote-diagnostic-'));t.after(()=>rm(own,{recursive:true,force:true}));
+  const file=join(own,'events.cjs');
+  await writeFile(file,"const {parentPort}=require('node:worker_threads');parentPort.postMessage({type:'diagnostic',value:'headers'});parentPort.postMessage({type:'error',domain:'api',code:'NETWORK'});");
+  const phases:string[]=[];
+  await assert.rejects(runAnalysisWorker(file,parseSource(Buffer.from('synthetic'),'a.txt'),{baseUrl:'https://fixture.invalid',model:'fixture',apiKey:'synthetic',contextWindow:8192,maxTokens:2048},{onDiagnostic:phase=>phases.push(phase)}));
+  assert.deepEqual(phases,['headers']);
+});
 test('cancelling an unresponsive analysis worker terminates it promptly',async t=>{
   const own=await mkdtemp(join(tmpdir(),'clipnote-worker-'));t.after(()=>rm(own,{recursive:true,force:true}));
   const file=join(own,'unresponsive.cjs');await writeFile(file,"setTimeout(()=>process.exit(0),1500);");
@@ -36,8 +67,9 @@ test('real analysis worker resumes validated chunks without requesting the first
   await new Promise<void>(resolve=>server.listen(0,'127.0.0.1',resolve));t.after(()=>new Promise<void>(resolve=>{server.closeAllConnections();server.close(()=>resolve());}));
   const credentials={baseUrl:`http://127.0.0.1:${(server.address() as any).port}/v1`,model:'fixture',apiKey:'synthetic',contextWindow:4096,maxTokens:2048};
   const source=parseSource(Buffer.from('中'.repeat(2000)),'long.txt');
-  const worker=fileURLToPath(new URL('../../src/main/analysis-worker.ts',import.meta.url));let checkpoints:any[]=[];
-  await assert.rejects(runAnalysisWorker(worker,source,credentials,{}),(error:any)=>{checkpoints=error.checkpoints;return error.code==='SERVER_ERROR';});
+  const worker=fileURLToPath(new URL('../../src/main/analysis-worker.ts',import.meta.url));let checkpoints:any[]=[];const diagnostic:string[]=[];
+  await assert.rejects(runAnalysisWorker(worker,source,credentials,{onDiagnostic:phase=>diagnostic.push(phase)}),(error:any)=>{checkpoints=error.checkpoints;return error.code==='SERVER_ERROR';});
+  assert.ok(diagnostic.includes('headers'));assert.ok(diagnostic.includes('first_text'));assert.ok(diagnostic.includes('validating'));assert.doesNotMatch(JSON.stringify(diagnostic),/synthetic|fixture|中/);
   assert.equal(checkpoints.length,1);fail=false;
   const result=await runAnalysisWorker(worker,source,credentials,{checkpoints});
   assert.ok(result.markdown.includes('已验证内容'));assert.equal(starts.filter(start=>start===0).length,1);assert.ok(result.checkpoints.length>1);

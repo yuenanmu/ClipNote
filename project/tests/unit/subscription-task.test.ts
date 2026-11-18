@@ -2,6 +2,36 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {createSubscriptionTask} from '../../src/main/subscription-task.ts';
 const id='12345678-1234-4234-8234-123456789abc';
+test('subscription preflight failure creates one diagnostic terminal', async()=>{
+ let available=true;
+ const terminals:string[]=[];
+ const task=createSubscriptionTask({trusted:()=>true,session:async()=>({status:'connected',sharing:true,profileId:'account'}),models:async()=>available?[{slug:'model'}]:[],preview:async()=>({sourcePath:'source',notePath:'note',name:'note',exists:false}),diagnostic:()=>({event:()=>{},finish:status=>terminals.push(status)}),analyze:async()=>{throw new Error('unexpected');},stage:async()=>id});
+ await task.prepare(null,id,id,'model','');available=false;
+ assert.equal((await task.start(null)).status,'error');
+ assert.deepEqual(terminals,['failed']);
+});
+test('subscription preflight cancellation creates one diagnostic terminal', async()=>{
+ let checking=false,release!:()=>void;
+ const terminals:string[]=[];
+ const task=createSubscriptionTask({trusted:()=>true,session:async()=>({status:'connected',sharing:true,profileId:'account'}),models:async()=>{if(checking)await new Promise<void>(resolve=>{release=resolve;});return [{slug:'model'}];},preview:async()=>({sourcePath:'source',notePath:'note',name:'note',exists:false}),diagnostic:()=>({event:()=>{},finish:status=>terminals.push(status)}),analyze:async()=>{throw new Error('unexpected');},stage:async()=>id});
+ await task.prepare(null,id,id,'model','');checking=true;
+ const started=task.start(null);await new Promise(resolve=>setTimeout(resolve,0));await task.cancel(null);release();
+ assert.equal((await started).status,'error');assert.deepEqual(terminals,['cancelled']);
+});
+test('subscription preflight exception records a safe failure', async()=>{
+ let checking=false;
+ const terminals:unknown[]=[];
+ const task=createSubscriptionTask({trusted:()=>true,session:async()=>{if(checking)throw Object.assign(new Error('private details'),{code:'network_error'});return {status:'connected',sharing:true,profileId:'account'};},models:async()=>[{slug:'model'}],preview:async()=>({sourcePath:'source',notePath:'note',name:'note',exists:false}),diagnostic:()=>({event:()=>{},finish:(status,error)=>terminals.push({status,error})}),analyze:async()=>{throw new Error('unexpected');},stage:async()=>id});
+ await task.prepare(null,id,id,'model','');checking=true;
+ assert.equal((await task.start(null)).status,'error');
+ assert.deepEqual(terminals,[{status:'failed',error:'network'}]);
+});
+test('subscription diagnostic captures staging and failure without source text',async()=>{
+ const events:string[]=[];
+ const task=createSubscriptionTask({trusted:()=>true,session:async()=>({status:'connected',sharing:true,profileId:'account'}),models:async()=>[{slug:'model'}],preview:async()=>({sourcePath:'source',notePath:'note',name:'note',exists:false}),diagnostic:()=>({event:(phase:string)=>events.push(phase),finish:(status:string)=>events.push(status)}),analyze:async(_id,_plan,_profile,_model,_instructions,_signal,diagnostic)=>{diagnostic?.('headers');return 'private';},stage:async()=>{throw new Error('private');}});
+ await task.prepare(null,id,id,'model','');await task.start(null);await new Promise(resolve=>setTimeout(resolve,0));
+ assert.deepEqual(events,['headers','staging','failed']);
+});
 test('confirmation rejects changed source and only stages completed output',async()=>{
  let checksum='one',staged=0,analyzed=0;
  const task=createSubscriptionTask({trusted:()=>true,session:async()=>({status:'connected',sharing:true,profileId:'account'}),models:async()=>[{slug:'model'}],preview:async()=>({sourcePath:'source',notePath:'note',name:'note',exists:false,sourceChecksum:checksum}),analyze:async()=>{analyzed++;return 'generated';},stage:async()=>{staged++;return id;}});
