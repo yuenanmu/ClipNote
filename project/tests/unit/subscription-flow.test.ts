@@ -16,10 +16,13 @@ test('subscription whole-file deadline aborts analysis and reports its own cause
 });
 test('subscription deadline settles even if the client ignores cancellation',async()=>{
  const source=parseSource(Buffer.from('测试来源'),'fixture.txt');
- const client={getSession:async()=>({status:'connected',sharing:true,profileId:'account'}),streamResponse:async()=>{await new Promise(resolve=>setTimeout(resolve,300));return {text:'late'};}};
+ const phases:string[]=[];
+ const client={getSession:async()=>({status:'connected',sharing:true,profileId:'account'}),streamResponse:async(options:{onHeaders?:()=>void;onDelta?:(text:string)=>void})=>{await new Promise(resolve=>setTimeout(resolve,300));options.onHeaders?.();options.onDelta?.('late private text');return {text:'late'};}};
  const start=performance.now();
- await assert.rejects(analyzeSubscription(source,client,'account','model',{deadlineMs:40}),(error:any)=>error.code==='FILE_TIMEOUT');
+ await assert.rejects(analyzeSubscription(source,client,'account','model',{deadlineMs:40,onDiagnostic:phase=>phases.push(phase)}),(error:any)=>error.code==='FILE_TIMEOUT');
  assert.ok(performance.now()-start<200);
+ await new Promise(resolve=>setTimeout(resolve,320));
+ assert.deepEqual(phases,['request']);
 });
 
 test('synthetic subscription workflow stages, confirms and reads a generated note',async t=>{
