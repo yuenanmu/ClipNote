@@ -4,13 +4,16 @@ import { ApiError } from '../modules/api/errors.ts';
 import { AnalysisError } from '../modules/analysis/errors.ts';
 import { WorkspaceError, type OutputPlan } from '../modules/workspace/files.ts';
 import type {BatchState,BatchItem,WorkspaceResult} from '../contracts/workspace.ts';
+import type { AnalysisDiagnosticPhase } from '../contracts/analysis.ts';
+import { classifyDiagnosticError, type DiagnosticPhase } from './organization-tasks.ts';
 
 type Config = { baseUrl: string; model: string; instructions?: string };
 interface Dependencies {
   isTrustedSender(event: unknown): boolean; config(): Promise<{ baseUrl: string; model: string }>;
   resetAnalysis?():void;
   preview(id: string, target: string): Promise<OutputPlan>;
-  analyze(id: string, config: Config, signal: AbortSignal, plan: OutputPlan, report:(progress:BatchItem['progress'],timing?:BatchItem['timing'])=>void): Promise<{ markdown: string;timing?:BatchItem['timing'];reused?:boolean }>;
+  analyze(id: string, config: Config, signal: AbortSignal, plan: OutputPlan, report:(progress:BatchItem['progress'],timing?:BatchItem['timing'])=>void, diagnostic?:(phase:AnalysisDiagnosticPhase,ageMs?:number)=>void): Promise<{ markdown: string;timing?:BatchItem['timing'];reused?:boolean }>;
+  diagnostic?(sourceId:string): { event(phase:DiagnosticPhase,ageMs?:number):void; progress?(value:NonNullable<BatchItem['progress']>):void; finish(status:'succeeded'|'failed'|'cancelled',error?:string):void };
   save(id: string, target: string, plan: OutputPlan, markdown: string): Promise<void>;
   lock?(plans: OutputPlan[]):()=>void;
   stage?(plan:OutputPlan,markdown:string):Promise<string>;
@@ -29,18 +32,20 @@ export function createBatchHandlers(deps: Dependencies): Record<'state' | 'prepa
       if (signal.aborted) { item.status = 'cancelled'; continue; }
       if(!pending.has(item.id)){item.timing=undefined;item.reused=false;}item.startedAt=Date.now();item.finishedAt=undefined;item.progress=undefined;
       item.status = 'running'; item.error = undefined; item.canRetrySave = false;
+      const diagnostic = deps.diagnostic?.(item.id);
       let saveStarted:number|undefined;
+      let diagnosticError:string|undefined;
       try {
-        let markdown=pending.get(item.id);if(markdown===undefined){const result=await deps.analyze(item.id,config!,signal,plans.get(item.id)!,(progress,timing)=>{if(item.status==='running'){if(progress)item.progress=progress;if(timing)item.timing=timing;}});markdown=result.markdown;item.timing=result.timing;item.reused=result.reused;}
+        let markdown=pending.get(item.id);if(markdown===undefined){const result=await deps.analyze(item.id,config!,signal,plans.get(item.id)!,(progress,timing)=>{if(item.status==='running'){if(progress){item.progress=progress;if(progress.phase!=='saving')diagnostic?.progress?.(progress);}if(timing)item.timing=timing;}},(phase,ageMs)=>diagnostic?.event(phase,ageMs));markdown=result.markdown;item.timing=result.timing;item.reused=result.reused;}
         if (signal.aborted) { item.status = 'cancelled'; continue; }
         pending.set(item.id, markdown);
-        saveStarted=performance.now();item.progress={phase:'saving',requests:item.timing?.requests??0,chunkIndex:0};
+        saveStarted=performance.now();diagnostic?.event('saving');item.progress={phase:'saving',requests:item.timing?.requests??0,chunkIndex:0};
         if(deps.stage && !drafts.has(item.id)) drafts.set(item.id,await deps.stage(plans.get(item.id)!,markdown));
         if(signal.aborted){item.status='cancelled';continue;}
         await deps.save(item.id, target, plans.get(item.id)!, markdown);
-        const draft=drafts.get(item.id);if(draft && deps.complete)await deps.complete(draft);drafts.delete(item.id);pending.delete(item.id); item.status = 'succeeded';
-      } catch (error) { item.status = signal.aborted ? 'cancelled' : 'failed'; if (!signal.aborted) { item.error = safe(error); item.canRetrySave = pending.has(item.id); } }
-      finally{item.finishedAt=Date.now();if(item.timing && saveStarted!==undefined)item.timing.saveMs+=performance.now()-saveStarted;}
+        const draft=drafts.get(item.id);if(draft && deps.complete)await deps.complete(draft);drafts.delete(item.id);pending.delete(item.id); item.status = 'succeeded';diagnostic?.event('saved');
+      } catch (error) { item.status = signal.aborted ? 'cancelled' : 'failed'; if (!signal.aborted) { diagnosticError=saveStarted!==undefined?'saving':classifyDiagnosticError(error);item.error = safe(error); item.canRetrySave = pending.has(item.id); } }
+      finally{diagnostic?.finish(item.status==='succeeded'?'succeeded':item.status==='cancelled'?'cancelled':'failed',diagnosticError);item.finishedAt=Date.now();if(item.timing && saveStarted!==undefined)item.timing.saveMs+=performance.now()-saveStarted;}
     }
     release?.();release=undefined;state.status = signal.aborted ? 'cancelled' : 'done'; abort = undefined;
   };

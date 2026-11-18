@@ -77,6 +77,7 @@ export interface StreamResponseOptions {
   input: string | ResponseInputMessage[];
   instructions?: string;
   signal?: AbortSignal;
+  onHeaders?: () => void;
   onDelta?: (delta: string) => void;
 }
 

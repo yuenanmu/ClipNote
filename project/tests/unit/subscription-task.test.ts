@@ -2,6 +2,12 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {createSubscriptionTask} from '../../src/main/subscription-task.ts';
 const id='12345678-1234-4234-8234-123456789abc';
+test('subscription diagnostic captures staging and failure without source text',async()=>{
+ const events:string[]=[];
+ const task=createSubscriptionTask({trusted:()=>true,session:async()=>({status:'connected',sharing:true,profileId:'account'}),models:async()=>[{slug:'model'}],preview:async()=>({sourcePath:'source',notePath:'note',name:'note',exists:false}),diagnostic:()=>({event:(phase:string)=>events.push(phase),finish:(status:string)=>events.push(status)}),analyze:async(_id,_plan,_profile,_model,_instructions,_signal,diagnostic)=>{diagnostic?.('headers');return 'private';},stage:async()=>{throw new Error('private');}});
+ await task.prepare(null,id,id,'model','');await task.start(null);await new Promise(resolve=>setTimeout(resolve,0));
+ assert.deepEqual(events,['headers','staging','failed']);
+});
 test('confirmation rejects changed source and only stages completed output',async()=>{
  let checksum='one',staged=0,analyzed=0;
  const task=createSubscriptionTask({trusted:()=>true,session:async()=>({status:'connected',sharing:true,profileId:'account'}),models:async()=>[{slug:'model'}],preview:async()=>({sourcePath:'source',notePath:'note',name:'note',exists:false,sourceChecksum:checksum}),analyze:async()=>{analyzed++;return 'generated';},stage:async()=>{staged++;return id;}});

@@ -11,6 +11,21 @@ const profile = { provider: 'api', model: 'synthetic-model', promptVersion: 't06
 const secret = 'synthetic-secret-value';
 async function server(t: test.TestContext, handler: RequestListener) { const s = createServer(handler); await new Promise<void>(resolve => s.listen(0, '127.0.0.1', resolve)); t.after(() => new Promise<void>(resolve => { s.closeAllConnections(); s.close(() => resolve()); })); return `http://127.0.0.1:${(s.address() as any).port}/v1`; }
 const credentials = (baseUrl: string): ApiConfigInput => ({ baseUrl, apiKey: secret, model: profile.model, contextWindow: 8192, maxTokens: 2048 });
+test('API diagnostics distinguish response headers and meaningful text', async t => {
+  const phases:string[]=[];
+  const base=await server(t,(_req,res)=>{
+    res.writeHead(200,{'Content-Type':'text/event-stream'});
+    res.flushHeaders();
+    res.write(': heartbeat\n\n');
+    const part=(content:string)=>res.write(`data: ${JSON.stringify({id:'fixture',object:'chat.completion.chunk',model:profile.model,choices:[{index:0,delta:{content},finish_reason:null}]})}\n\n`);
+    part(' ');part('hello');
+    res.write(`data: ${JSON.stringify({id:'fixture',object:'chat.completion.chunk',model:profile.model,choices:[{index:0,delta:{},finish_reason:'stop'}]})}\n\n`);
+    res.end('data: [DONE]\n\n');
+  });
+  const adapter=createApiAdapter(credentials(base),60000,undefined,phase=>phases.push(phase));
+  await adapter({chunk:{chunkId:'test',index:0,core:[],context:[],request:'synthetic'},profile,repair:false});
+  assert.deepEqual(phases,['request','headers','first_text','last_text','received']);
+});
 function send(response: any, text: string, finish = 'stop') { response.writeHead(200, { 'Content-Type': 'text/event-stream' }); response.write(`data: ${JSON.stringify({ id: 'fixture', object: 'chat.completion.chunk', model: profile.model, choices: [{ index: 0, delta: { role: 'assistant', content: text }, finish_reason: null }] })}\n\n`); response.write(`data: ${JSON.stringify({ id: 'fixture', object: 'chat.completion.chunk', model: profile.model, choices: [{ index: 0, delta: {}, finish_reason: finish }] })}\n\n`); response.end('data: [DONE]\n\n'); }
 const valid = () => { const ref = { segmentId: source.segments[0].segmentId, startOffset: 0, endOffset: source.segments[0].text.length }; return JSON.stringify({ title: '笔记', sections: [{ heading: '章节', refs: [ref], items: [{ kind: 'point', text: '要点', refs: [ref], children: [] }] }] }); };
 

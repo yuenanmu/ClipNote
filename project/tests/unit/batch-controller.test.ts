@@ -4,6 +4,22 @@ import { createBatchHandlers } from '../../src/main/batch-controller.ts';
 const ids=['11111111-1111-4111-8111-111111111111','22222222-2222-4222-8222-222222222222'];
 const target='33333333-3333-4333-8333-333333333333', config={baseUrl:'https://fixture.invalid',model:'fixture',instructions:''};
 const tick=()=>new Promise(resolve=>setTimeout(resolve,5));
+test('batch emits one diagnostic lifecycle including failed save',async()=>{
+  const events:string[]=[];
+  const h=createBatchHandlers({isTrustedSender:()=>true,config:async()=>config,preview:async(id:string)=>({sourcePath:id,notePath:id+'.md',name:'a.md',exists:false}),
+    diagnostic:()=>({event:(phase:string)=>events.push(phase),finish:(status:string)=>events.push(status)}),
+    analyze:async(_id,_config,_signal,_plan,_report,diagnostic)=>{diagnostic?.('headers');return {markdown:'# test'};},save:async()=>{throw new Error('private');}});
+  await h.prepare('trusted',[ids[0]],target,config);await h.start('trusted');await until(h,'done');
+  assert.deepEqual(events,['headers','saving','failed']);
+});
+test('batch forwards real chunk progress to its diagnostic record',async()=>{
+  let seen:any;
+  const h=createBatchHandlers({isTrustedSender:()=>true,config:async()=>config,preview:async(id:string)=>({sourcePath:id,notePath:id+'.md',name:'a.md',exists:false}),
+    diagnostic:()=>({event:()=>{},progress:value=>{seen=value;},finish:()=>{}}),
+    analyze:async(_id,_config,_signal,_plan,report)=>{report({phase:'waiting',requests:1,chunkIndex:0,totalChunks:3});return {markdown:'# test'};},save:async()=>{}});
+  await h.prepare('trusted',[ids[0]],target,config);await h.start('trusted');await until(h,'done');
+  assert.equal(seen.totalChunks,3);assert.equal(seen.chunkIndex,0);
+});
 test('running and failed items retain live progress and timing from the analyzer',async()=>{
   let fail:()=>void=()=>{};
   const h=createBatchHandlers({isTrustedSender:()=>true,config:async()=>config,preview:async(id:string)=>({sourcePath:id,notePath:id+'.md',name:id+'.md',exists:false}),

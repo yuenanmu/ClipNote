@@ -14,3 +14,15 @@ test('subscription adapter rejects account changes before and after a response',
   await assert.rejects(createSubscriptionAdapter(client,'p1','model-a')(request),/账户/);
   calls=1;await assert.rejects(createSubscriptionAdapter(client,'p1','model-a')(request),/账户/);
 });
+test('subscription reports only meaningful output events without exposing content', async()=>{
+  const events:string[]=[];
+  const client={getSession:async()=>({status:'connected',sharing:true,profileId:'p1'}),streamResponse:async(options:any)=>{options.onHeaders();options.onDelta('  ');options.onDelta('秘密');options.onDelta('文字');return {text:'{}'};}};
+  await createSubscriptionAdapter(client,'p1','model-a',phase=>events.push(phase))(request);
+  assert.deepEqual(events,['request','headers','first_text','last_text','last_text','received']);
+});
+test('cancelled subscription ignores late response callbacks',async()=>{
+ const controller=new AbortController(),phases:string[]=[];
+ const client={getSession:async()=>({status:'connected',sharing:true,profileId:'p1'}),streamResponse:async(options:any)=>{controller.abort();options.onHeaders();options.onDelta('late private');return {text:'private'};}};
+ await assert.rejects(createSubscriptionAdapter(client,'p1','model-a',phase=>phases.push(phase))({...request,signal:controller.signal}));
+ assert.deepEqual(phases,['request']);
+});

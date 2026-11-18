@@ -11,6 +11,13 @@ const tick = () => new Promise(resolve => setTimeout(resolve, 5));
 async function until(handler: any, status: string) { for (let n=0;n<100;n++) { const state=await handler.state('trusted'); if (state.value?.status===status) return state.value; await tick(); } throw new Error(`State did not reach ${status}`); }
 function setup(overrides: any = {}) { let requests=0, saves=0; const handlers=createWorkflowHandlers({ isTrustedSender: (e: unknown)=>e==='trusted', source: (id: string)=>id===document.sourceId?snapshot:undefined, credentials: async()=>credentials, hasDirectory: async()=>true, analyze: async (_s: any,_c: any,opts: any)=>{ requests++; opts.onCheckpoint({}); return result; }, save: async()=>{ saves++; return revision; }, resume: async()=>revision, ...overrides }); return { handlers, counts:()=>({requests,saves}) }; }
 
+test('direct workflow records analysis and save diagnostics',async()=>{
+ const events:string[]=[];
+ const f=setup({diagnostic:()=>({event:(phase:string)=>events.push(phase),finish:(status:string)=>events.push(status)}),analyze:async(_s:any,_c:any,options:any)=>{options.onDiagnostic('headers');return result;}});
+ await f.handlers.start('trusted',document.sourceId,{baseUrl:credentials.baseUrl,model:credentials.model});await until(f.handlers,'succeeded');
+ assert.deepEqual(events,['headers','saving','saved','succeeded']);
+});
+
 test('trusted explicit start uses known snapshot, reports progress and saves a generated version', async () => {
   const f=setup(); const initial = await f.handlers.state('trusted'); assert.ok(initial.status === 'ok'); assert.equal(initial.value.status,'idle'); assert.deepEqual(f.counts(),{requests:0,saves:0});
   assert.equal((await f.handlers.start('other',document.sourceId)).status,'error'); assert.equal((await f.handlers.start('trusted','unknown')).status,'error'); assert.deepEqual(f.counts(),{requests:0,saves:0});

@@ -7,6 +7,7 @@ import { createHash } from 'node:crypto';
 import { analyzeSource } from '../analysis/run.ts';
 import { planAnalysis } from '../analysis/plan.ts';
 import { AnalysisError } from '../analysis/errors.ts';
+import { createDiagnosticEmitter } from '../analysis/diagnostic-emitter.ts';
 export async function analyzeWithApi(source: SourceDocument, credentials: ApiConfigInput, options: AnalysisOptions = {}): Promise<AnalysisResult> {
   const inputCharBudget = Math.max(1000, Math.min(16000, Math.floor((credentials.contextWindow - credentials.maxTokens - 512) / 3)));
   const profile = { provider: `api:${createHash('sha256').update(credentials.baseUrl).digest('hex')}`, model: credentials.model, promptVersion: 't15-ranges-v3', inputCharBudget, outputCharBudget: 64000, overlapChars: 0, inputByteBudget: Math.min(512000, credentials.contextWindow - credentials.maxTokens - 612), ...(options.instructions ? { instructions: options.instructions } : {}) };
@@ -17,7 +18,7 @@ export async function analyzeWithApi(source: SourceDocument, credentials: ApiCon
   const signal=options.signal?AbortSignal.any([options.signal,deadline.signal]):deadline.signal;
   let currentChunk=0;let currentPhase: 'waiting'|'receiving'|'validating'='waiting';
   const report=()=>options.onProgress?.({phase:currentPhase,requests,chunkIndex:currentChunk,totalChunks:chunks,maxRequests,deadlineMs});
-  const adapter = createApiAdapter(credentials,60000,()=>{currentPhase='receiving';report();}); let failure: ApiError | undefined; const started = performance.now(); let prepareMs = 0, apiMs = 0, requests = 0;
+  const adapter = createApiAdapter(credentials,60000,()=>{currentPhase='receiving';report();},options.onDiagnostic); let failure: ApiError | undefined; const started = performance.now(); let prepareMs = 0, apiMs = 0, requests = 0;
   try { return await analyzeSource(source, profile, async request => { if(requests>=maxRequests){failure=new ApiError('REQUEST_LIMIT');throw failure;} const begin = performance.now(); requests++;currentChunk=request.chunk.index;currentPhase='waiting';report();options.onMetrics?.({prepareMs,apiMs,localMs:0,requests}); try { return await adapter(request); } catch (error) { if (error instanceof ApiError) failure = error; throw error; } finally { apiMs += performance.now() - begin;currentPhase='validating';report();options.onMetrics?.({prepareMs,apiMs,localMs:0,requests}); } }, { ...options, signal, splitTruncated: true, onPrepared: ms => { prepareMs = ms; options.onPrepared?.(ms); } }); }
   catch (error) { if(deadline.signal.aborted && !options.signal?.aborted){const timed=new ApiError('TIMEOUT');if(error instanceof AnalysisError)Object.assign(timed,{checkpoints:error.checkpoints});throw timed;} if (failure && error instanceof AnalysisError && error.code === 'SERVICE_FAILED') { Object.assign(failure, { checkpoints: error.checkpoints }); throw failure; } throw error; }
   finally { clearTimeout(deadlineTimer);options.onMetrics?.({ prepareMs, apiMs, localMs: Math.max(0, performance.now() - started - prepareMs - apiMs), requests }); }
@@ -65,10 +66,11 @@ function waitForSignal<T>(operation: Promise<T>, signal: AbortSignal): Promise<T
     if (signal.aborted) abort();
   });
 }
-export function createApiAdapter(credentials: ApiConfigInput, timeoutMs = 60000, onReceiving?:()=>void): AnalysisAdapter {
+export function createApiAdapter(credentials: ApiConfigInput, timeoutMs = 60000, onReceiving?:()=>void, onDiagnostic?:(phase:'request'|'headers'|'first_text'|'last_text'|'received',ageMs?:number)=>void): AnalysisAdapter {
   const config = { ...credentials };
   const model = { id: config.model, name: config.model, api: 'openai-completions' as const, provider: 'clipnote-api', baseUrl: config.baseUrl, reasoning: false, input: ['text' as const], cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }, contextWindow: config.contextWindow, maxTokens: config.maxTokens };
   return async request => {
+    const diagnostic=createDiagnosticEmitter(onDiagnostic);
     if (request.signal?.aborted) throw new ApiError('CANCELLED');
     const compact = compactReferences(request.chunk.request);
     const prompt = compact.prompt + (request.repair ? '\n上次结果格式错误。请仅输出符合要求的完整 JSON，不要添加代码围栏。' : '\n请仅输出完整 JSON，不要添加代码围栏。');
@@ -81,14 +83,28 @@ export function createApiAdapter(credentials: ApiConfigInput, timeoutMs = 60000,
       const models = createModels();
       models.setProvider(createProvider({ id: 'clipnote-api', name: 'ClipNote API', baseUrl: config.baseUrl, auth: { apiKey: { name: 'Configured API', resolve: async () => ({ auth: { apiKey: config.apiKey } }) } }, models: [model], api: openAICompletionsApi() }));
       signal.throwIfAborted();
-      const response = await waitForSignal(models.completeSimple(models.getModel('clipnote-api', config.model)!, { messages: [{ role: 'user', content: prompt, timestamp: Date.now() }] }, { maxTokens: config.maxTokens, maxRetries: 0, signal, fetch: async (input, init) => {
-        const result = await fetch(input, { ...init, redirect: 'error' }); status = result.status;
+      diagnostic('request');
+      const stream = models.streamSimple(models.getModel('clipnote-api', config.model)!, { messages: [{ role: 'user', content: prompt, timestamp: Date.now() }] }, { maxTokens: config.maxTokens, maxRetries: 0, signal, fetch: async (input, init) => {
+        const result = await fetch(input, { ...init, redirect: 'error' }); status = result.status; diagnostic('headers');
         if (signal.aborted) { await result.body?.cancel(); signal.throwIfAborted(); }
         if (!result.body) return result;
         const reader = result.body.getReader(); let size = 0; let received=false; const limit = Math.min(4 * 1024 * 1024, Math.max(1024 * 1024, request.profile.outputCharBudget * 64));
         const bounded = new ReadableStream<Uint8Array>({ async pull(controller) { try { const part = await reader.read(); if (part.done) { controller.close(); return; } if(!received){received=true;onReceiving?.();}size += part.value.byteLength; if (size > limit) { await reader.cancel(); controller.error(new Error('response limit exceeded')); return; } controller.enqueue(part.value); } catch (error) { streamFailed = true; controller.error(error); } }, cancel() { return reader.cancel(); } });
         return new Response(bounded, { status: result.status, statusText: result.statusText, headers: result.headers });
-      } }), signal);
+      } });
+      const consume = async () => {
+        let receivedText = false;
+        for await (const event of stream) {
+          if (event.type === 'text_delta' && event.delta.trim() && !signal.aborted) {
+            if (!receivedText) { receivedText = true; diagnostic('first_text'); }
+            diagnostic('last_text');
+          }
+        }
+        const value = await stream.result();
+        if (!signal.aborted) diagnostic('received');
+        return value;
+      };
+      const response = await waitForSignal(consume(), signal);
       if (request.signal?.aborted) throw new ApiError('CANCELLED');
       if (timeout.aborted) throw new ApiError('TIMEOUT');
       if (streamFailed && response.stopReason !== 'stop' && response.stopReason !== 'length') throw new ApiError('NETWORK');
@@ -99,5 +115,6 @@ export function createApiAdapter(credentials: ApiConfigInput, timeoutMs = 60000,
       if (!text || text.length > request.profile.outputCharBudget) throw new ApiError('INVALID_RESPONSE');
       return { status: 'completed', value: restoreReferences(text, compact.ids, compact.ranges) };
     } catch (error) { throw error instanceof ApiError ? error : new ApiError(request.signal?.aborted ? 'CANCELLED' : timeout.aborted ? 'TIMEOUT' : 'NETWORK'); }
+    finally { diagnostic.flush(); }
   };
 }

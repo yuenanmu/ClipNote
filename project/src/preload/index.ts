@@ -1,6 +1,8 @@
 import { contextBridge, ipcRenderer } from 'electron';
 import type { DesktopApi } from '../contracts/desktop.ts';
 const api: DesktopApi = {
+  organizationList:()=>ipcRenderer.invoke('organization:list'),
+  organizationGet:id=>ipcRenderer.invoke('organization:get',id),
   subscriptionTaskState:()=>ipcRenderer.invoke('subscription-task:state'),
   subscriptionTaskPrepare:(...args)=>ipcRenderer.invoke('subscription-task:prepare',...args),
   subscriptionTaskStart:()=>ipcRenderer.invoke('subscription-task:start'),

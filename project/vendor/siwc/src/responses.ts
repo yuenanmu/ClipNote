@@ -49,6 +49,7 @@ export async function streamResponse(
       stream: true,
     }, { signal: requestSignal, headers: { accept: "text/event-stream" } }).withResponse();
     response = result.response;
+    if (!requestSignal.aborted) options.onHeaders?.();
     const contentType = response.headers.get("content-type")?.split(";", 1)[0]?.trim().toLowerCase();
     // The direct route can return valid SSE without Content-Type. In that case,
     // validate the events below and still require response.completed for success.

@@ -46,6 +46,17 @@ test('duplicate files reuse one request with live progress, independent saves an
   const state=await page.evaluate(()=>window.clipnote.batchState());
   assert.equal(state.value.items[1].timing.requests,0);assert.equal(state.value.items[2].timing.apiMs,0);
   assert.equal(state.value.items[3].timing.requests,1);assert.ok(state.value.items[3].finishedAt);
+  const diagnostics=await page.evaluate(()=>window.clipnote.organizationList());
+  assert.equal(diagnostics.status,'ok');
+  const success=diagnostics.value.find(item=>item.service==='api' && item.status==='succeeded' && item.events.some(event=>event.phase==='first_text'));
+  const failed=diagnostics.value.find(item=>item.service==='api' && item.status==='failed');
+  assert.ok(success);assert.ok(failed);assert.equal(failed.error,'network');
+  const phases=success.events.map(event=>event.phase);
+  for(const phase of ['request','headers','first_text','received','validating','saving','saved','succeeded'])assert.ok(phases.includes(phase),phase);
+  assert.ok(phases.indexOf('headers')<phases.indexOf('first_text'));
+  assert.doesNotMatch(JSON.stringify(diagnostics),/same 😀 content|synthetic|测试内容/);
+  const byId=await page.evaluate(id=>window.clipnote.organizationGet(id),success.id);assert.deepEqual(byId.value,success);
+  assert.equal((await page.evaluate(()=>window.clipnote.organizationGet('invalid'))).status,'error');
   await panel.locator('.batch-item.failed').scrollIntoViewIfNeeded();
   await page.screenshot({path:join(base,'batch-latency-results.png')});
   failing=false;await panel.getByLabel('重试 d.txt').check();await panel.getByRole('button',{name:'重试选中失败项'}).click();

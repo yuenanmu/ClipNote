@@ -63,6 +63,7 @@ export async function analyzeSource(source: SourceDocument, profile: AnalysisPro
         return validateOutline(mergeOutlines(outlines), snapshot, chunk);
       }
       if (response?.status !== 'completed') throw new AnalysisError('SERVICE_FAILED');
+      options.onDiagnostic?.('validating');
       try { return validateOutline(output(response.value), snapshot, chunk); }
       catch (error) { if (!(error instanceof AnalysisError) || error.code !== 'INVALID_STRUCTURE' || repair === 1) throw error; }
     }
