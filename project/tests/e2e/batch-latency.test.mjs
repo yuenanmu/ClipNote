@@ -28,14 +28,18 @@ test('duplicate files reuse one request with live progress, independent saves an
     const text=JSON.stringify({title:'合成笔记',sections:[{heading:'章节',refs,items:[{kind:'point',text:'测试内容',refs,children:[]}]}]});
     res.writeHead(200,{'Content-Type':'text/event-stream'});
     const frame=(content,finish)=>`data: ${JSON.stringify({id:'fixture',object:'chat.completion.chunk',model:'fixture',choices:[{index:0,delta:{content},finish_reason:finish}]})}\n\n`;
-    res.write(frame(text,null));await new Promise(resolve=>setTimeout(resolve,900));
+    if(process.env.CLIPNOTE_TEST_LONG_STREAM==='1' && calls===1){
+      const parts=[text.slice(0,8),text.slice(8,16),text.slice(16,24),text.slice(24)];
+      res.write(frame(parts[0],null));
+      for(const part of parts.slice(1)){await new Promise(resolve=>setTimeout(resolve,20500));if(!res.destroyed)res.write(frame(part,null));}
+    }else{res.write(frame(text,null));await new Promise(resolve=>setTimeout(resolve,900));}
     if(!res.destroyed)res.end(frame('','stop')+'data: [DONE]\n\n');
   });
   await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
   const env={...process.env,CLIPNOTE_TEST_USER_DATA:join(own,'profile')};delete env.ELECTRON_RUN_AS_NODE;
   let app;
   t.after(async()=>{if(app)await app.close();await new Promise(resolve=>{server.closeAllConnections();server.close(resolve);});assert.equal(resolve(dirname(own)),resolve(base));rmSync(own,{recursive:true,force:true});});
-  app=await electron.launch({executablePath:electronPath,args:[fileURLToPath(new URL('../../dist/main/index.cjs',import.meta.url))],env});const page=await app.firstWindow();page.setDefaultTimeout(15000);
+  app=await electron.launch({executablePath:electronPath,args:[fileURLToPath(new URL('../../dist/main/index.cjs',import.meta.url))],env});const page=await app.firstWindow();page.setDefaultTimeout(process.env.CLIPNOTE_TEST_LONG_STREAM==='1'?90000:15000);
   assert.equal((await page.evaluate(input=>window.clipnote.apiSave(input),{baseUrl:`http://127.0.0.1:${server.address().port}/v1`,model:'fixture',apiKey:'synthetic',contextWindow:8192,maxTokens:2048})).status,'ok');
   const pick=path=>app.evaluate(({dialog},value)=>{dialog.showOpenDialog=async()=>({canceled:false,filePaths:[value]});},path);
   await pick(sources);await page.getByRole('button',{name:'打开资料文件夹',exact:true}).click();
@@ -44,10 +48,24 @@ test('duplicate files reuse one request with live progress, independent saves an
   const panel=page.getByRole('region',{name:'批量整理'});await panel.getByRole('button',{name:'批量整理（4）'}).click();await panel.getByRole('button',{name:'选择笔记文件夹'}).click();await pick(notes);
   const picker=page.getByRole('dialog',{name:'选择笔记保存位置'});await picker.getByRole('button',{name:'打开笔记文件夹'}).click();await picker.getByRole('button',{name:'使用此文件夹'}).click();
   await panel.getByRole('button',{name:'检查所选文件'}).click();await panel.getByRole('button',{name:'确认发送并开始'}).click();
-  await panel.getByText(/等待服务响应 ·/).waitFor();await page.screenshot({path:join(base,'batch-latency-waiting.png')});
-  await panel.getByText(/正在接收响应 ·/).waitFor();
+
+  await panel.getByLabel('整理阶段').getByRole('status').getByText('等待首个有效输出',{exact:true}).waitFor();
+  const active = panel.locator('.batch-item.running').getByLabel('整理阶段');
+  await active.getByRole('progressbar').waitFor();
+  assert.equal(await active.getByRole('progressbar').getAttribute('value'), null);
+  assert.equal(await active.locator('details').getAttribute('open'), null);
+  await page.screenshot({path:join(base,'batch-latency-waiting.png')});
+  await active.getByText('详细信息').focus();
+  await active.getByText('详细信息').press('Enter');
+  await active.getByText(/单请求上限 600 秒/).waitFor();
+
+  const waitingText=await active.getByText(/已用/).innerText();
+  await page.waitForTimeout(600);
+  assert.notEqual(await active.getByText(/已用/).innerText(),waitingText,'waiting elapsed time should advance');
+  await panel.getByLabel('整理阶段').getByRole('status').getByText('正在接收正文',{exact:true}).waitFor();
   await panel.locator('.batch-item.failed').filter({hasText:'d.txt'}).waitFor();
-  assert.equal(calls,2);assert.equal(await panel.getByText('复用本批相同内容，未重复请求 AI。',{exact:true}).count(),2);
+  await panel.locator('.batch-item.failed').filter({hasText:'d.txt'}).getByLabel('整理阶段').getByText(/连接中断或服务不可用/).waitFor();
+  assert.equal(calls,2);assert.equal(await panel.getByText('已复用本批整理结果。',{exact:true}).count(),2);
   for(const name of ['a','b','c'])assert.match(readFileSync(join(notes,name+'.md'),'utf8'),/测试内容/);
   const state=await page.evaluate(()=>window.clipnote.batchState());
   assert.equal(state.value.items[1].timing.requests,0);assert.equal(state.value.items[2].timing.apiMs,0);
@@ -75,14 +93,15 @@ test('duplicate files reuse one request with live progress, independent saves an
   await panel.locator('.batch-item.succeeded').filter({hasText:'d.txt'}).waitFor();assert.equal(calls,3);
   // A new batch must issue fresh requests. An externally changed duplicate must not reuse old content.
   await panel.getByRole('button',{name:'检查所选文件'}).click();await panel.getByRole('button',{name:'确认发送并开始'}).click();
-  await panel.getByText(/等待服务响应 ·/).first().waitFor();writeFileSync(join(sources,'c.txt'),'external change');
+  await panel.locator('.batch-item.running').getByRole('status').getByText('等待首个有效输出',{exact:true}).waitFor();writeFileSync(join(sources,'c.txt'),'external change');
   await panel.locator('.batch-item.failed').filter({hasText:'c.txt'}).waitFor();
   await panel.locator('.batch-item.succeeded').filter({hasText:'d.txt'}).waitFor();
   assert.equal(calls,5);assert.match(readFileSync(join(notes,'c.md'),'utf8'),/测试内容/);
   const previous=await page.evaluate(()=>window.clipnote.organizationList());
   const previousIds=new Set(previous.value.map(item=>item.id));
+  const existingNotes=names.map(name=>readFileSync(join(notes,name.replace('.txt','.md')),'utf8'));
   await panel.getByRole('button',{name:'检查所选文件'}).click();await panel.getByRole('button',{name:'确认发送并开始'}).click();
-  await panel.getByText(/等待服务响应 ·/).first().waitFor();
+  await panel.locator('.batch-item.running').getByRole('status').getByText('等待首个有效输出',{exact:true}).waitFor();
   await panel.getByRole('button',{name:'停止批量整理'}).click();
   let cancelled;
   for(let i=0;i<100 && !cancelled;i++){
@@ -94,4 +113,9 @@ test('duplicate files reuse one request with live progress, independent saves an
   assert.equal(cancelled.events.filter(event=>['succeeded','failed','cancelled'].includes(event.phase)).length,1);
   assert.ok(!cancelled.events.some(event=>event.phase==='saving'));
   assert.doesNotMatch(JSON.stringify(cancelled),/same 😀 content|synthetic/);
+  await page.waitForTimeout(1500);
+  for(const [index,name] of names.entries())assert.equal(readFileSync(join(notes,name.replace('.txt','.md')),'utf8'),existingNotes[index]);
+  const afterCancel=await page.evaluate(id=>window.clipnote.organizationGet(id),cancelled.id);
+  assert.equal(afterCancel.value.status,'cancelled');
+  assert.equal(afterCancel.value.events.filter(event=>['succeeded','failed','cancelled'].includes(event.phase)).length,1);
 });

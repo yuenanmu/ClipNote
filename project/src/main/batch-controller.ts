@@ -13,7 +13,7 @@ interface Dependencies {
   resetAnalysis?():void;
   preview(id: string, target: string): Promise<OutputPlan>;
   analyze(id: string, config: Config, signal: AbortSignal, plan: OutputPlan, report:(progress:BatchItem['progress'],timing?:BatchItem['timing'])=>void, diagnostic?:(phase:AnalysisDiagnosticPhase,ageMs?:number)=>void): Promise<{ markdown: string;timing?:BatchItem['timing'];reused?:boolean }>;
-  diagnostic?(sourceId:string): { event(phase:DiagnosticPhase,ageMs?:number):void; progress?(value:NonNullable<BatchItem['progress']>):void; finish(status:'succeeded'|'failed'|'cancelled',error?:string):void };
+  diagnostic?(sourceId:string): { id?:string; event(phase:DiagnosticPhase,ageMs?:number):void; progress?(value:NonNullable<BatchItem['progress']>):void; finish(status:'succeeded'|'failed'|'cancelled',error?:string):void };
   save(id: string, target: string, plan: OutputPlan, markdown: string): Promise<void>;
   lock?(plans: OutputPlan[]):()=>void;
   stage?(plan:OutputPlan,markdown:string):Promise<string>;
@@ -33,6 +33,7 @@ export function createBatchHandlers(deps: Dependencies): Record<'state' | 'prepa
       if(!pending.has(item.id)){item.timing=undefined;item.reused=false;}item.startedAt=Date.now();item.finishedAt=undefined;item.progress=undefined;
       item.status = 'running'; item.error = undefined; item.canRetrySave = false;
       const diagnostic = deps.diagnostic?.(item.id);
+      item.diagnosticId = diagnostic?.id;
       let saveStarted:number|undefined;
       let diagnosticError:string|undefined;
       try {
@@ -44,14 +45,14 @@ export function createBatchHandlers(deps: Dependencies): Record<'state' | 'prepa
         if(signal.aborted){item.status='cancelled';continue;}
         await deps.save(item.id, target, plans.get(item.id)!, markdown);
         const draft=drafts.get(item.id);if(draft && deps.complete)await deps.complete(draft);drafts.delete(item.id);pending.delete(item.id); item.status = 'succeeded';diagnostic?.event('saved');
-      } catch (error) { item.status = signal.aborted ? 'cancelled' : 'failed'; if (!signal.aborted) { diagnosticError=saveStarted!==undefined?'saving':classifyDiagnosticError(error);item.error = safe(error); item.canRetrySave = pending.has(item.id); } }
+      } catch (error) { item.status = signal.aborted && saveStarted===undefined ? 'cancelled' : 'failed'; if (item.status==='failed') { diagnosticError=saveStarted!==undefined?'saving':classifyDiagnosticError(error);item.error = safe(error); item.canRetrySave = pending.has(item.id); } }
       finally{diagnostic?.finish(item.status==='succeeded'?'succeeded':item.status==='cancelled'?'cancelled':'failed',diagnosticError);item.finishedAt=Date.now();if(item.timing && saveStarted!==undefined)item.timing.saveMs+=performance.now()-saveStarted;}
     }
     release?.();release=undefined;state.status = signal.aborted ? 'cancelled' : 'done'; abort = undefined;
   };
   const handle = (action: 'state' | 'prepare' | 'start' | 'cancel' | 'retry' | 'saved') => async (event: unknown, ...args: unknown[]) => {
     if (!deps.isTrustedSender(event)) return failure('无法执行批量整理。');
-    if(action==='saved'){if(args.length!==2 || !isUuid(args[0]) || typeof args[1]!=='string')return failure('保存状态无效。');for(const item of state.items)if(drafts.get(item.id)===args[0]){drafts.delete(item.id);pending.delete(item.id);item.status='succeeded';item.outputPath=args[1];item.error=undefined;item.canRetrySave=false;}return snapshot();}
+    if(action==='saved'){if(args.length!==2 || !isUuid(args[0]) || typeof args[1]!=='string')return failure('保存状态无效。');for(const item of state.items)if(drafts.get(item.id)===args[0]){drafts.delete(item.id);pending.delete(item.id);item.status='succeeded';item.outputPath=args[1];item.error=undefined;item.canRetrySave=false;item.diagnosticId=undefined;}return snapshot();}
     if (action === 'state') return args.length ? failure('无法执行批量整理。') : snapshot();
     if (action === 'cancel') { if (args.length) return failure('无法执行批量整理。'); abort?.abort(); return snapshot(); }
     if (state.status === 'running' || preparing) return failure('已有批量任务正在进行。');

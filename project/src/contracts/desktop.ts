@@ -12,7 +12,7 @@ export type ReaderResult<T> = { status: 'ok'; value: T } | { status: 'cancelled'
 export type ImportErrorCode = SourceErrorCode | 'IMPORT_BUSY' | 'FORBIDDEN_REQUEST' | 'IMPORT_FAILED';
 export type ImportResult = { status: 'imported'; document: SourceDocument; entryId?:string } | { status: 'cancelled' } | { status: 'error'; error: { code: ImportErrorCode; message: string } };
 export type StorageResult<T> = { status: 'ok'; value: T } | { status: 'cancelled' } | { status: 'error'; error: { code: StorageErrorCode | 'FORBIDDEN_REQUEST' | 'STORAGE_BUSY'; message: string; draftId?: string } };
-export interface SubscriptionTaskState {status:'idle'|'ready'|'running'|'done'|'failed'|'cancelled'; model?:string;profileId?:string;accountLabel?:string;sourcePath?:string;outputPath?:string;overwrite?:boolean;resultId?:string;error?:string}
+export interface SubscriptionTaskState {diagnosticId?:string;status:'idle'|'ready'|'running'|'done'|'failed'|'cancelled'; model?:string;profileId?:string;accountLabel?:string;sourcePath?:string;outputPath?:string;overwrite?:boolean;resultId?:string;error?:string}
 export interface DesktopApi {
   organizationList():Promise<WorkspaceResult<import('./organization-task.ts').OrganizationTaskSnapshot[]>>;
   organizationGet(id:string):Promise<WorkspaceResult<import('./organization-task.ts').OrganizationTaskSnapshot|null>>;

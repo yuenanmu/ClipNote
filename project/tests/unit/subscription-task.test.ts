@@ -2,6 +2,12 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {createSubscriptionTask} from '../../src/main/subscription-task.ts';
 const id='12345678-1234-4234-8234-123456789abc';
+test('subscription task exposes its current diagnostic attempt',async()=>{
+ const task=createSubscriptionTask({trusted:()=>true,session:async()=>({status:'connected',sharing:true,profileId:'account'}),models:async()=>[{slug:'model'}],preview:async()=>({sourcePath:'source',notePath:'note',name:'note',exists:false}),diagnostic:()=>({id:'current-attempt',event:()=>{},finish:()=>{},pending:()=>{}}),analyze:async()=> 'result',stage:async()=>id});
+ await task.prepare(null,id,id,'model','');const started=await task.start(null);
+ assert.equal(started.status,'ok');if(started.status==='ok')assert.equal(started.value.diagnosticId,'current-attempt');
+ await new Promise(resolve=>setTimeout(resolve,0));const state=await task.state(null);if(state.status==='ok')assert.equal(state.value.diagnosticId,'current-attempt');
+});
 test('subscription preflight failure creates one diagnostic terminal', async()=>{
  let available=true;
  const terminals:string[]=[];

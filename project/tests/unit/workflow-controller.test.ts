@@ -10,6 +10,13 @@ const result = { markdown: '# 合成笔记', sourceRefs: [document.segments[0].s
 const tick = () => new Promise(resolve => setTimeout(resolve, 5));
 async function until(handler: any, status: string) { for (let n=0;n<100;n++) { const state=await handler.state('trusted'); if (state.value?.status===status) return state.value; await tick(); } throw new Error(`State did not reach ${status}`); }
 function setup(overrides: any = {}) { let requests=0, saves=0; const handlers=createWorkflowHandlers({ isTrustedSender: (e: unknown)=>e==='trusted', source: (id: string)=>id===document.sourceId?snapshot:undefined, credentials: async()=>credentials, hasDirectory: async()=>true, analyze: async (_s: any,_c: any,opts: any)=>{ requests++; opts.onCheckpoint({}); return result; }, save: async()=>{ saves++; return revision; }, resume: async()=>revision, ...overrides }); return { handlers, counts:()=>({requests,saves}) }; }
+test('direct workflow exposes the current diagnostic attempt',async()=>{
+ let attempt=0, saves=0;
+ const f=setup({diagnostic:()=>({id:`attempt-${++attempt}`,event:()=>{},finish:()=>{}}),save:async()=>{if(++saves===1)throw new Error('save failed');return revision;},resume:async()=>revision});
+ await f.handlers.start('trusted',document.sourceId,{baseUrl:credentials.baseUrl,model:credentials.model});
+ const first=await until(f.handlers,'failed');assert.equal(first.diagnosticId,'attempt-1');
+ await f.handlers.retry('trusted');const second=await until(f.handlers,'succeeded');assert.equal(second.diagnosticId,'attempt-2');
+});
 
 test('direct workflow records analysis and save diagnostics',async()=>{
  const events:string[]=[];

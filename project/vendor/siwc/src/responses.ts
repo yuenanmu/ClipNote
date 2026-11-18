@@ -3,6 +3,7 @@ import { subscriptionFetch } from './transport.js';
 import OpenAI from "openai";
 import { apiError, ChatGPTError, isObject } from "./errors.js";
 import type { StreamResponseOptions } from "./types.js";
+import { createStreamDeadline, STREAM_DEADLINE_DEFAULTS } from '../../../src/modules/analysis/stream-deadline.ts';
 
 export async function streamResponse(
   accessToken: string,
@@ -38,7 +39,8 @@ export async function streamResponse(
     },
   });
   // The SDK's timeout ends at headers; keep the existing deadline on the body too.
-  const requestSignal = AbortSignal.any([signal, AbortSignal.timeout(180_000)]);
+  const deadline = createStreamDeadline(options.deadline ?? STREAM_DEADLINE_DEFAULTS);
+  const requestSignal = AbortSignal.any([signal, deadline.signal]);
   let response: Response | undefined;
   try {
     const result = await client.responses.create({
@@ -64,6 +66,7 @@ export async function streamResponse(
       requestSignal.throwIfAborted();
       if (!isObject(event)) continue;
       if (event.type === "response.output_text.delta" && typeof event.delta === "string") {
+        deadline.text(event.delta);
         text += event.delta;
         if (text.length > 16 * 1024 * 1024) throw new ChatGPTError("response_too_large", "The response was too large. Try a smaller request.");
         options.onDelta?.(event.delta);
@@ -83,6 +86,7 @@ export async function streamResponse(
     return { text };
   } catch (error) {
     if (signal.aborted) throw new ChatGPTError("cancelled", "The response was cancelled.");
+    if (deadline.reason()) throw new ChatGPTError(deadline.reason()!, "The response timed out.", true);
     if (error instanceof ChatGPTError) throw error;
     // SDK errors can contain submitted text. Only expose our sanitized diagnostics,
     // including errors the SDK raises while decoding an SSE 'error' event.
@@ -94,5 +98,5 @@ export async function streamResponse(
     if (!response) throw new ChatGPTError("network_error", "Could not reach ChatGPT. Check your connection and try again.", true);
     if (error instanceof SyntaxError) throw new ChatGPTError("invalid_stream", "The response stream contained an invalid event. Try again.", true);
     throw new ChatGPTError("stream_interrupted", "The connection was interrupted. You can keep the partial text or try again.", true);
-  }
+  } finally { deadline.dispose(); }
 }

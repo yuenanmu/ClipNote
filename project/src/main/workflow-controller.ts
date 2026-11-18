@@ -13,7 +13,7 @@ interface Dependencies {
   credentials(): Promise<ApiConfigInput>; hasDirectory(): Promise<boolean>;
   analyze(source: SourceSnapshot['document'], credentials: ApiConfigInput, options: AnalysisOptions): Promise<AnalysisResult>;
   save(snapshot: SourceSnapshot, result: AnalysisResult): Promise<SavedRevision>; resume(id: string): Promise<SavedRevision>;
-  diagnostic?(sourceId:string):{event(phase:DiagnosticPhase,ageMs?:number):void;finish(status:'succeeded'|'failed'|'cancelled',error?:string):void};
+  diagnostic?(sourceId:string):{id?:string;event(phase:DiagnosticPhase,ageMs?:number):void;finish(status:'succeeded'|'failed'|'cancelled',error?:string):void};
 }
 export function createWorkflowHandlers(deps: Dependencies): Record<'state' | 'start' | 'cancel' | 'retry', (event: unknown, ...args: unknown[]) => Promise<WorkflowResult>> {
   let state: WorkflowState = { status: 'idle', completedChunks: 0 }; let abort: AbortController | undefined;
@@ -47,10 +47,10 @@ export function createWorkflowHandlers(deps: Dependencies): Record<'state' | 'st
     if (action === 'state') return { status: 'ok', value: snapshot() };
     if (action === 'cancel') { if (state.status === 'running') abort?.abort(); return { status: 'ok', value: snapshot() }; }
     if (['running', 'saving'].includes(state.status)) return errorResult('BUSY', '已有分析或保存正在进行。');
-    if (action === 'retry') { if (!pending) return errorResult('INVALID_REQUEST', '没有待重试的保存结果。'); void publish(deps.diagnostic?.(pending.snapshot.document.sourceId)); return { status: 'ok', value: snapshot() }; }
+    if (action === 'retry') { if (!pending) return errorResult('INVALID_REQUEST', '没有待重试的保存结果。'); const diagnostic=deps.diagnostic?.(pending.snapshot.document.sourceId);state={...state,diagnosticId:diagnostic?.id};void publish(diagnostic); return { status: 'ok', value: snapshot() }; }
     if (pending) return errorResult('SAVE_PENDING', '请先重试保存已完成的结果。');
     const source = deps.source(args[0] as string); if (!source) return errorResult('INVALID_REQUEST', '来源已过期，请重新导入。');
-    abort = new AbortController(); state = { status: 'running', completedChunks: 0, sourceId: source.document.sourceId, timing: { prepareMs: 0, apiMs: 0, localMs: 0, saveMs: 0, requests: 0 } }; void run(source, abort.signal, expected as { baseUrl: string; model: string; instructions?: string },deps.diagnostic?.(source.document.sourceId));
+    const diagnostic=deps.diagnostic?.(source.document.sourceId); abort = new AbortController(); state = { status: 'running', completedChunks: 0, diagnosticId:diagnostic?.id, sourceId: source.document.sourceId, timing: { prepareMs: 0, apiMs: 0, localMs: 0, saveMs: 0, requests: 0 } }; void run(source, abort.signal, expected as { baseUrl: string; model: string; instructions?: string },diagnostic);
     return { status: 'ok', value: snapshot() };
   };
   return { state: handler('state'), start: handler('start'), cancel: handler('cancel'), retry: handler('retry') };

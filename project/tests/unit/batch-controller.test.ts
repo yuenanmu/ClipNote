@@ -1,9 +1,21 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createBatchHandlers } from '../../src/main/batch-controller.ts';
+import { WorkspaceFiles } from '../../src/modules/workspace/files.ts';
+import {mkdir,mkdtemp,readFile,rm,writeFile} from 'node:fs/promises';
+import {join} from 'node:path';
 const ids=['11111111-1111-4111-8111-111111111111','22222222-2222-4222-8222-222222222222'];
 const target='33333333-3333-4333-8333-333333333333', config={baseUrl:'https://fixture.invalid',model:'fixture',instructions:''};
 const tick=()=>new Promise(resolve=>setTimeout(resolve,5));
+test('batch retry exposes the diagnostic ID of the current attempt',async()=>{
+ let attempt=0;
+ const h=createBatchHandlers({isTrustedSender:()=>true,config:async()=>config,preview:async(id:string)=>({sourcePath:id,notePath:id+'.md',name:'a.md',exists:false}),
+  diagnostic:()=>({id:`attempt-${++attempt}`,event:()=>{},finish:()=>{}}),
+  analyze:async()=>{if(attempt===1)throw new Error('failed');return {markdown:'# test'};},save:async()=>{}});
+ await h.prepare('trusted',[ids[0]],target,config);await h.start('trusted');
+ const first=await until(h,'done');assert.equal(first.items[0].diagnosticId,'attempt-1');
+ await h.retry('trusted',[ids[0]]);const second=await until(h,'done');assert.equal(second.items[0].diagnosticId,'attempt-2');
+});
 test('batch emits one diagnostic lifecycle including failed save',async()=>{
   const events:string[]=[];
   const h=createBatchHandlers({isTrustedSender:()=>true,config:async()=>config,preview:async(id:string)=>({sourcePath:id,notePath:id+'.md',name:'a.md',exists:false}),
@@ -45,6 +57,56 @@ test('batch cancel stops queued files and late results are not saved', async () 
   await h.prepare('trusted',ids,target,config); await h.start('trusted'); await until(h,'running'); await h.cancel('trusted'); release(); const state=await until(h,'cancelled');
   assert.equal(calls,1); assert.equal(saved,0); assert.equal(state.items[1].status,'cancelled');
 });
+test('cancelling during a committed save reports the actual saved item',async()=>{
+ let release!:()=>void,entered!:()=>void;
+ const started=new Promise<void>(resolve=>{entered=resolve;});
+ const terminal:string[]=[];
+ const h=createBatchHandlers({isTrustedSender:()=>true,config:async()=>config,preview:async(id:string)=>({sourcePath:id,notePath:id+'.md',name:'a.md',exists:false}),
+  diagnostic:()=>({event:()=>{},finish:status=>terminal.push(status)}),analyze:async()=>({markdown:'# note'}),
+  save:async()=>{entered();await new Promise<void>(resolve=>{release=resolve;});}});
+ await h.prepare('trusted',[ids[0]],target,config);await h.start('trusted');await started;
+ await h.cancel('trusted');release();const state=await until(h,'cancelled');
+ assert.equal(state.items[0].status,'succeeded');assert.deepEqual(terminal,['succeeded']);
+});
+test('cancelling while an actual workspace write completes retains its saved result',async t=>{
+ const base=join(process.cwd(),'.local','test-artifacts');await mkdir(base,{recursive:true});
+ const dir=await mkdtemp(join(base,'batch-cancel-save-'));t.after(()=>rm(dir,{recursive:true,force:true}));
+ const sources=join(dir,'sources'),notes=join(dir,'notes');await mkdir(sources);await mkdir(notes);await writeFile(join(sources,'source.txt'),'synthetic source');
+ const workspace=new WorkspaceFiles(join(dir,'state'));
+ const sourceRoot=await workspace.choose('source',sources),noteRoot=await workspace.choose('notes',notes);
+ const entry=(await workspace.list('source',sourceRoot.id)).entries[0];
+ let release!:()=>void,entered!:()=>void;const started=new Promise<void>(resolve=>{entered=resolve;});
+ const h=createBatchHandlers({isTrustedSender:()=>true,config:async()=>config,preview:(id,folder)=>workspace.previewOutput(id,folder),
+  analyze:async()=>({markdown:'# synthetic note'}),
+  save:async(id,folder,plan,text)=>{await workspace.writeOutput(id,folder,plan,text);entered();await new Promise<void>(resolve=>{release=resolve;});}});
+ await h.prepare('trusted',[entry.id],noteRoot.id,config);await h.start('trusted');await started;
+ await h.cancel('trusted');release();const state=await until(h,'cancelled');
+ assert.equal(state.items[0].status,'succeeded');assert.equal(await readFile(join(notes,'source.md'),'utf8'),'# synthetic note');
+});
+test('a target conflict during cancellation keeps the generated result retryable',async t=>{
+ const base=join(process.cwd(),'.local','test-artifacts');await mkdir(base,{recursive:true});
+ const dir=await mkdtemp(join(base,'batch-cancel-conflict-'));t.after(()=>rm(dir,{recursive:true,force:true}));
+ const sources=join(dir,'sources'),notes=join(dir,'notes');await mkdir(sources);await mkdir(notes);await writeFile(join(sources,'source.txt'),'synthetic source');
+ const workspace=new WorkspaceFiles(join(dir,'state'));
+ const sourceRoot=await workspace.choose('source',sources),noteRoot=await workspace.choose('notes',notes);
+ const entry=(await workspace.list('source',sourceRoot.id)).entries[0];
+ let release!:()=>void,entered!:()=>void;const started=new Promise<void>(resolve=>{entered=resolve;});
+ const h=createBatchHandlers({isTrustedSender:()=>true,config:async()=>config,preview:(id,folder)=>workspace.previewOutput(id,folder),
+  analyze:async()=>({markdown:'# synthetic note'}),save:async(id,folder,plan,text)=>{entered();await new Promise<void>(resolve=>{release=resolve;});await workspace.writeOutput(id,folder,plan,text);}});
+ await h.prepare('trusted',[entry.id],noteRoot.id,config);await h.start('trusted');await started;
+ await writeFile(join(notes,'source.md'),'external edit');await h.cancel('trusted');release();const state=await until(h,'cancelled');
+ assert.equal(state.items[0].status,'failed');assert.equal(state.items[0].canRetrySave,true);
+ assert.match(state.items[0].error,/已存在|已更改/);assert.equal(await readFile(join(notes,'source.md'),'utf8'),'external edit');
+});
+test('cancelling while staging does not start the save',async()=>{
+ let release!:()=>void,entered!:()=>void,saved=0;
+ const started=new Promise<void>(resolve=>{entered=resolve;});
+ const h=createBatchHandlers({isTrustedSender:()=>true,config:async()=>config,preview:async(id:string)=>({sourcePath:id,notePath:id+'.md',name:'a.md',exists:false}),
+  analyze:async()=>({markdown:'# note'}),stage:async()=>{entered();await new Promise<void>(resolve=>{release=resolve;});return ids[1];},save:async()=>{saved++;}});
+ await h.prepare('trusted',[ids[0]],target,config);await h.start('trusted');await started;
+ await h.cancel('trusted');release();const state=await until(h,'cancelled');
+ assert.equal(saved,0);assert.equal(state.items[0].status,'cancelled');
+});
 test('retrying a failed save reuses generated Markdown without another request', async () => {
   let calls=0, saves=0; const h=createBatchHandlers({ isTrustedSender:()=>true, config:async()=>config, preview:async(id:string)=>({sourcePath:id,notePath:id+'.md',name:id+'.md',exists:false}),
     analyze:async()=>{calls++; return {markdown:'# 保存结果'};}, save:async(_id:string,_target:string,_plan:any,text:string)=>{ assert.equal(text,'# 保存结果'); if(++saves===1) throw new Error('disk full'); } });
@@ -67,4 +129,10 @@ test('batch retains generated results before saving and releases only its own lo
 test('saving a retained result updates the queue without repeating the model request',async()=>{
   let requests=0;const h=createBatchHandlers({isTrustedSender:()=>true,config:async()=>config,preview:async(id:string)=>({sourcePath:id,notePath:id+'.md',name:'a.md',exists:false}),analyze:async()=>{requests++;return {markdown:'# done'};},stage:async()=>ids[1],save:async()=>{throw new Error('full');}});
   await h.prepare('trusted',[ids[0]],target,config);await h.start('trusted');await until(h,'done');await h.saved('trusted',ids[1],'new.md');const state=await until(h,'done');assert.equal(state.items[0].status,'succeeded');assert.equal(state.items[0].outputPath,'new.md');assert.equal(requests,1);
+});
+test('saving a retained result does not leave its failed diagnostic attached',async()=>{
+ const h=createBatchHandlers({isTrustedSender:()=>true,config:async()=>config,preview:async(id:string)=>({sourcePath:id,notePath:id+'.md',name:'a.md',exists:false}),
+  diagnostic:()=>({id:'failed-attempt',event:()=>{},finish:()=>{}}),analyze:async()=>({markdown:'# done'}),stage:async()=>ids[1],save:async()=>{throw new Error('full');}});
+ await h.prepare('trusted',[ids[0]],target,config);await h.start('trusted');const failed=await until(h,'done');assert.equal(failed.items[0].diagnosticId,'failed-attempt');
+ await h.saved('trusted',ids[1],'new.md');const saved=await until(h,'done');assert.equal(saved.items[0].status,'succeeded');assert.equal(saved.items[0].diagnosticId,undefined);
 });
