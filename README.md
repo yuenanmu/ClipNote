@@ -1,36 +1,37 @@
 # ClipNote
 
-ClipNote 是开发中的 Windows 桌面 App，目标是把视频字幕或已有文本整理成可追溯的 Markdown 层级笔记，在 App 内阅读并保存到指定本地位置。
+ClipNote 是一款 Windows 桌面应用。把视频字幕或已有文本整理成带来源引用的 Markdown 笔记，再用正文和脑图一起阅读。笔记保存在你选择的本地文件夹里，也可以用 Obsidian 或其他 Markdown 编辑器打开。
 
-首版设计支持 SRT、VTT、TXT、MD 导入，API 与 ChatGPT 订阅两种 AI 连接，以及可选 SmartSub 来源。SmartSub 接入也属于首版交付要求；文件分析和本地阅读可独立使用。Obsidian 只是可选外部编辑器。
+## 快速开始
 
-当前已有文件工作台、归档版本和独立“笔记”区。可导入 SRT/VTT/TXT/MD 核对来源并保存独立版本；已有 MD 可加入持久列表，切换多个文件和归档笔记。每份笔记可选 Markdown、Markmap 脑图或可拖动比例的双栏对照：正文保留折叠大纲，脑图直接显示标题、列表和段落，按章节展开、保留完整文字，并可联动定位原文。原文件保持原位，移出列表只移除登记。导入、归档与阅读均在本地进行，无需 AI 登录、SmartSub 或 Obsidian；AI 整理和 Windows 候选包已实现；验收缺口见任务清单。
+1. 打开 [示例字幕](project/tests/fixtures/示例%20字幕.srt)，下载到本机，再在 ClipNote 中打开。点击字幕片段可核对时间和原文。
+2. 如需 AI 整理，在设置中填写兼容 API 的地址、模型和密钥，或使用应用内的 ChatGPT 订阅登录入口。选中文件后点击「AI 整理」，确认发送内容和笔记保存位置。
+3. 整理完成后，在「笔记」里打开 Markdown。可切换正文、脑图和双栏对照。
 
-已安装依赖时，在 `project/` 中执行 `npm.cmd run build`，再执行 `npm.cmd start` 即可打开窗口。首次准备与所有验证命令见 [project/README](project/README.md)；可用[合成字幕](project/tests/fixtures/示例%20字幕.srt)试用。任务授权与实际进度统一见[任务清单](docs/任务清单.md)。
+导入 SRT、VTT、TXT 和 Markdown、查看字幕与阅读已有笔记都可在本地完成。使用 AI 整理时，确认发送的资料会交给所选服务。SmartSub 是可选的独立工具，用于从支持的视频来源获取字幕或转写。
 
-## 目录与阅读顺序
+## 功能预览
 
-- 项目根目录为本 README 所在目录；B 电脑为 `D:\Obsidian\yuenanmu\10-项目\ClipNote`，A 电脑路径以其实际克隆为准。
-- `project/`：桌面源码、测试、配置及 T02 验证工具，不另建仓库。
-- `docs/`：需求、架构、任务和交接。
-- [问题记录](docs/问题记录.md)：持续维护同一文件，保存值得复用的问题与防复发办法。
-- `prompts/`：对话参考模板，不构成授权。
+### 逐段核对字幕原文
 
-先读 [AGENTS](AGENTS.md)、[项目索引](docs/项目索引.md)、[当前交接](docs/当前交接.md)，再读[架构](docs/架构.md)、[模块索引](docs/模块/模块索引.md)及相关任务。任务清单用复选框显示完成情况，模块文档说明职责、接口与依赖。
+![ClipNote 显示字幕时间与选中片段的原文行号](docs/images/source-location.png)
 
-## 当前阶段
+### 看清 AI 整理进行到哪一步
 
-用户于 2026-11-17 确认第一版开发和 Windows 打包完成。订阅候选和 Windows 打包已合入 main；v0.1.0-candidate 为第一版候选标签。真实服务质量、登录生命周期和跨电脑等验收缺口见[任务清单](docs/任务清单.md)。第二版方向见[开发计划](docs/第二版开发计划.md)。
+![AI 批量整理显示已处理份数和当前任务的等待进度](docs/images/organization-progress.png)
 
-技术路线采用 Electron、React、TypeScript；API 使用 pi-ai，订阅使用 DevKit，SmartSub 通过 CLI 适配。
+### 用正文和脑图对照阅读
 
-本地来源、生成笔记、模型、运行时和凭据不进入 Git；仅保存必要的公开或合成验证资料。
+![同一份 Markdown 笔记在正文和脑图中并列展示](docs/images/markdown-mindmap.png)
 
+## 从源码运行
 
-在仓库根目录（终端路径以 `ClipNote` 结尾）启动已构建的应用：
+在仓库根目录执行以下命令。首次环境准备、依赖和完整验证步骤见 [开发指南](project/README.md)。
 
 ```powershell
+npm.cmd --prefix .\project ci
+npm.cmd --prefix .\project run build
 npm.cmd --prefix .\project start
 ```
 
-根目录没有 `package.json`，不要在这里直接执行 `npm.cmd start`。如需重新构建，在根目录执行 `npm.cmd --prefix .\project run build`；启动命令本身不会构建。
+Windows 便携版的下载与使用说明将在通过预览版验收后随 Release 提供。当前已实现和待验收内容见 [任务清单](docs/任务清单.md)。
