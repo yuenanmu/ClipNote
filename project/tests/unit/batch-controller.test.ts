@@ -130,3 +130,9 @@ test('saving a retained result updates the queue without repeating the model req
   let requests=0;const h=createBatchHandlers({isTrustedSender:()=>true,config:async()=>config,preview:async(id:string)=>({sourcePath:id,notePath:id+'.md',name:'a.md',exists:false}),analyze:async()=>{requests++;return {markdown:'# done'};},stage:async()=>ids[1],save:async()=>{throw new Error('full');}});
   await h.prepare('trusted',[ids[0]],target,config);await h.start('trusted');await until(h,'done');await h.saved('trusted',ids[1],'new.md');const state=await until(h,'done');assert.equal(state.items[0].status,'succeeded');assert.equal(state.items[0].outputPath,'new.md');assert.equal(requests,1);
 });
+test('saving a retained result does not leave its failed diagnostic attached',async()=>{
+ const h=createBatchHandlers({isTrustedSender:()=>true,config:async()=>config,preview:async(id:string)=>({sourcePath:id,notePath:id+'.md',name:'a.md',exists:false}),
+  diagnostic:()=>({id:'failed-attempt',event:()=>{},finish:()=>{}}),analyze:async()=>({markdown:'# done'}),stage:async()=>ids[1],save:async()=>{throw new Error('full');}});
+ await h.prepare('trusted',[ids[0]],target,config);await h.start('trusted');const failed=await until(h,'done');assert.equal(failed.items[0].diagnosticId,'failed-attempt');
+ await h.saved('trusted',ids[1],'new.md');const saved=await until(h,'done');assert.equal(saved.items[0].status,'succeeded');assert.equal(saved.items[0].diagnosticId,undefined);
+});

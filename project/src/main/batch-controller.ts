@@ -52,7 +52,7 @@ export function createBatchHandlers(deps: Dependencies): Record<'state' | 'prepa
   };
   const handle = (action: 'state' | 'prepare' | 'start' | 'cancel' | 'retry' | 'saved') => async (event: unknown, ...args: unknown[]) => {
     if (!deps.isTrustedSender(event)) return failure('无法执行批量整理。');
-    if(action==='saved'){if(args.length!==2 || !isUuid(args[0]) || typeof args[1]!=='string')return failure('保存状态无效。');for(const item of state.items)if(drafts.get(item.id)===args[0]){drafts.delete(item.id);pending.delete(item.id);item.status='succeeded';item.outputPath=args[1];item.error=undefined;item.canRetrySave=false;}return snapshot();}
+    if(action==='saved'){if(args.length!==2 || !isUuid(args[0]) || typeof args[1]!=='string')return failure('保存状态无效。');for(const item of state.items)if(drafts.get(item.id)===args[0]){drafts.delete(item.id);pending.delete(item.id);item.status='succeeded';item.outputPath=args[1];item.error=undefined;item.canRetrySave=false;item.diagnosticId=undefined;}return snapshot();}
     if (action === 'state') return args.length ? failure('无法执行批量整理。') : snapshot();
     if (action === 'cancel') { if (args.length) return failure('无法执行批量整理。'); abort?.abort(); return snapshot(); }
     if (state.status === 'running' || preparing) return failure('已有批量任务正在进行。');
