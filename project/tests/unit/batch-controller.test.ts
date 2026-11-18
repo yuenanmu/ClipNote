@@ -1,6 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createBatchHandlers } from '../../src/main/batch-controller.ts';
+import { WorkspaceFiles } from '../../src/modules/workspace/files.ts';
+import {mkdir,mkdtemp,readFile,rm,writeFile} from 'node:fs/promises';
+import {join} from 'node:path';
 const ids=['11111111-1111-4111-8111-111111111111','22222222-2222-4222-8222-222222222222'];
 const target='33333333-3333-4333-8333-333333333333', config={baseUrl:'https://fixture.invalid',model:'fixture',instructions:''};
 const tick=()=>new Promise(resolve=>setTimeout(resolve,5));
@@ -64,6 +67,21 @@ test('cancelling during a committed save reports the actual saved item',async()=
  await h.prepare('trusted',[ids[0]],target,config);await h.start('trusted');await started;
  await h.cancel('trusted');release();const state=await until(h,'cancelled');
  assert.equal(state.items[0].status,'succeeded');assert.deepEqual(terminal,['succeeded']);
+});
+test('cancelling while an actual workspace write completes retains its saved result',async t=>{
+ const base=join(process.cwd(),'.local','test-artifacts');await mkdir(base,{recursive:true});
+ const dir=await mkdtemp(join(base,'batch-cancel-save-'));t.after(()=>rm(dir,{recursive:true,force:true}));
+ const sources=join(dir,'sources'),notes=join(dir,'notes');await mkdir(sources);await mkdir(notes);await writeFile(join(sources,'source.txt'),'synthetic source');
+ const workspace=new WorkspaceFiles(join(dir,'state'));
+ const sourceRoot=await workspace.choose('source',sources),noteRoot=await workspace.choose('notes',notes);
+ const entry=(await workspace.list('source',sourceRoot.id)).entries[0];
+ let release!:()=>void,entered!:()=>void;const started=new Promise<void>(resolve=>{entered=resolve;});
+ const h=createBatchHandlers({isTrustedSender:()=>true,config:async()=>config,preview:(id,folder)=>workspace.previewOutput(id,folder),
+  analyze:async()=>({markdown:'# synthetic note'}),
+  save:async(id,folder,plan,text)=>{await workspace.writeOutput(id,folder,plan,text);entered();await new Promise<void>(resolve=>{release=resolve;});}});
+ await h.prepare('trusted',[entry.id],noteRoot.id,config);await h.start('trusted');await started;
+ await h.cancel('trusted');release();const state=await until(h,'cancelled');
+ assert.equal(state.items[0].status,'succeeded');assert.equal(await readFile(join(notes,'source.md'),'utf8'),'# synthetic note');
 });
 test('cancelling while staging does not start the save',async()=>{
  let release!:()=>void,entered!:()=>void,saved=0;
