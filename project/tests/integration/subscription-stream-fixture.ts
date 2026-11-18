@@ -5,6 +5,23 @@ import {setSubscriptionTransport} from '../../vendor/siwc/src/transport.ts';
 import {parseSource} from '../../src/modules/source/parser.ts';
 import {analyzeSubscription} from '../../src/modules/subscription/analyze.ts';
 const sse=(events:unknown[])=>new Response(events.map(event=>'data: '+JSON.stringify(event)+'\n\n').join(''),{status:200,headers:{'Content-Type':'text/event-stream'}});
+test('subscription first output deadline ignores whitespace',async()=>{
+ setSubscriptionTransport(async()=>new Response(new ReadableStream({start(controller){controller.enqueue(new TextEncoder().encode('data: '+JSON.stringify({type:'response.output_text.delta',delta:' '})+'\n\n'));setTimeout(()=>{try{controller.close();}catch{}},200);}}),{headers:{'Content-Type':'text/event-stream'}}));
+ await assert.rejects(streamResponse('synthetic-token',{model:'fixture',input:'source',deadline:{firstOutputMs:50,idleMs:50,requestMs:500}},new AbortController().signal),(error:any)=>error.code==='FIRST_OUTPUT_TIMEOUT');
+});
+test('subscription distinguishes idle output from the hard request deadline',async()=>{
+ for(const scenario of ['idle','request'] as const){
+  let timer:ReturnType<typeof setInterval>|undefined;
+  setSubscriptionTransport(async()=>new Response(new ReadableStream({start(controller){
+   const send=(delta:string)=>controller.enqueue(new TextEncoder().encode('data: '+JSON.stringify({type:'response.output_text.delta',delta})+'\n\n'));
+   send('text');
+   timer=setInterval(()=>{try{send(scenario==='idle'?' ':'text');}catch{}},20);
+  },cancel(){if(timer)clearInterval(timer);}}),{headers:{'Content-Type':'text/event-stream'}}));
+  try{
+   await assert.rejects(streamResponse('synthetic-token',{model:'fixture',input:'source',deadline:{firstOutputMs:200,idleMs:60,requestMs:150}},new AbortController().signal),(error:any)=>error.code===(scenario==='idle'?'STREAM_IDLE_TIMEOUT':'REQUEST_TIMEOUT'));
+  }finally{if(timer)clearInterval(timer);}
+ }
+});
 test('subscription analysis reports actual stream headers, nonblank text and validation without leaking content',async()=>{
  const source=parseSource(Buffer.from('private source'),'fixture.txt');const segment=source.segments[0];
  const refs=[{segmentId:segment.segmentId,startOffset:0,endOffset:segment.text.length}];

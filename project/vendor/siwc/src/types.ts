@@ -79,6 +79,7 @@ export interface StreamResponseOptions {
   signal?: AbortSignal;
   onHeaders?: () => void;
   onDelta?: (delta: string) => void;
+  deadline?: { firstOutputMs: number; idleMs: number; requestMs: number };
 }
 
 export interface SignInOptions {

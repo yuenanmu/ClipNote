@@ -9,6 +9,19 @@ import {analyzeSubscription} from '../../src/modules/subscription/analyze.ts';
 import {createSubscriptionTask} from '../../src/main/subscription-task.ts';
 import {createOrganizationTasks} from '../../src/main/organization-tasks.ts';
 
+test('subscription whole-file deadline aborts analysis and reports its own cause',async()=>{
+ const source=parseSource(Buffer.from('测试来源'),'fixture.txt');
+ const client={getSession:async()=>({status:'connected',sharing:true,profileId:'account'}),streamResponse:async({signal}:{signal?:AbortSignal})=>new Promise<{text:string}>((_,reject)=>signal?.addEventListener('abort',()=>reject(new Error('aborted')),{once:true}))};
+ await assert.rejects(analyzeSubscription(source,client,'account','model',{deadlineMs:40}),(error:any)=>error.code==='FILE_TIMEOUT');
+});
+test('subscription deadline settles even if the client ignores cancellation',async()=>{
+ const source=parseSource(Buffer.from('测试来源'),'fixture.txt');
+ const client={getSession:async()=>({status:'connected',sharing:true,profileId:'account'}),streamResponse:async()=>{await new Promise(resolve=>setTimeout(resolve,300));return {text:'late'};}};
+ const start=performance.now();
+ await assert.rejects(analyzeSubscription(source,client,'account','model',{deadlineMs:40}),(error:any)=>error.code==='FILE_TIMEOUT');
+ assert.ok(performance.now()-start<200);
+});
+
 test('synthetic subscription workflow stages, confirms and reads a generated note',async t=>{
  const base=join(process.cwd(),'.local','test-artifacts');await mkdir(base,{recursive:true});const dir=await mkdtemp(join(base,'subscription-flow-'));t.after(()=>rm(dir,{recursive:true,force:true}));
  const sources=join(dir,'sources'),notes=join(dir,'notes');await mkdir(sources);await mkdir(notes);await writeFile(join(sources,'fixture.txt'),'测试来源内容');

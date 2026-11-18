@@ -6,5 +6,5 @@ import {join} from 'node:path';
 import {spawnSync} from 'node:child_process';
 test('subscription response stream completion gates',async()=>{
  await mkdir(join(process.cwd(),'.local'),{recursive:true});const directory=await mkdtemp(join(process.cwd(),'.local','stream-test-'));
- try{const output=join(directory,'test.mjs');await build({entryPoints:['tests/integration/subscription-stream-fixture.ts'],outfile:output,bundle:true,platform:'node',format:'esm',packages:'external',logLevel:'silent'});const result=spawnSync(process.execPath,['--test',output],{encoding:'utf8'});assert.equal(result.status,0,result.stdout+result.stderr);}finally{await rm(directory,{recursive:true,force:true});}
+ try{const output=join(directory,'test.mjs');await build({entryPoints:['tests/integration/subscription-stream-fixture.ts'],outfile:output,bundle:true,platform:'node',format:'esm',packages:'external',logLevel:'silent'});const env={...process.env};delete env.NODE_TEST_CONTEXT;const result=spawnSync(process.execPath,['--test',output],{encoding:'utf8',env});assert.equal(result.status,0,result.stdout+result.stderr);}finally{await rm(directory,{recursive:true,force:true});}
 });

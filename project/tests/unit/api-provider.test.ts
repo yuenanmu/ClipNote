@@ -11,6 +11,34 @@ const profile = { provider: 'api', model: 'synthetic-model', promptVersion: 't06
 const secret = 'synthetic-secret-value';
 async function server(t: test.TestContext, handler: RequestListener) { const s = createServer(handler); await new Promise<void>(resolve => s.listen(0, '127.0.0.1', resolve)); t.after(() => new Promise<void>(resolve => { s.closeAllConnections(); s.close(() => resolve()); })); return `http://127.0.0.1:${(s.address() as any).port}/v1`; }
 const credentials = (baseUrl: string): ApiConfigInput => ({ baseUrl, apiKey: secret, model: profile.model, contextWindow: 8192, maxTokens: 2048 });
+test('a continuously active stream can outlive the former fixed request timeout', async t => {
+  await import('@earendil-works/pi-ai');
+  await import('@earendil-works/pi-ai/api/openai-completions.lazy');
+  const base = await server(t, (_req, res) => {
+    res.writeHead(200, {'Content-Type':'text/event-stream'});
+    const frame = (content:string, finish:string|null) => `data: ${JSON.stringify({id:'fixture',object:'chat.completion.chunk',model:profile.model,choices:[{index:0,delta:{content},finish_reason:finish}]})}\n\n`;
+    res.write(frame('first',null));
+    const timer = setInterval(() => { if (!res.destroyed) res.write(frame('more',null)); }, 15);
+    res.on('close', () => clearInterval(timer));
+    setTimeout(() => { clearInterval(timer); if (!res.destroyed) res.end(frame('', 'stop')+'data: [DONE]\n\n'); }, 700);
+  });
+  const adapter = createApiAdapter(credentials(base), {firstOutputMs:300,idleMs:300,requestMs:1800});
+  const result = await adapter({chunk:{chunkId:'test',index:0,core:[],context:[],request:'synthetic'},profile,repair:false});
+  assert.equal(result.status, 'completed');
+});
+test('API distinguishes waiting for output from stalled output', async t => {
+  for (const scenario of ['first', 'idle'] as const) {
+    const base = await server(t, (_req, res) => {
+      res.writeHead(200, {'Content-Type':'text/event-stream'});
+      const frame = (content:string) => `data: ${JSON.stringify({id:'fixture',object:'chat.completion.chunk',model:profile.model,choices:[{index:0,delta:{content},finish_reason:null}]})}\n\n`;
+      res.write(frame(scenario === 'first' ? ' ' : 'text'));
+      const timer = setInterval(() => { if (!res.destroyed) res.write(': heartbeat\n\n'); }, 20);
+      res.on('close', () => clearInterval(timer));
+    });
+    const adapter = createApiAdapter(credentials(base), {firstOutputMs:300,idleMs:80,requestMs:1500});
+    await assert.rejects(adapter({chunk:{chunkId:'test',index:0,core:[],context:[],request:'synthetic'},profile,repair:false}), (error:any) => error.code === (scenario === 'first' ? 'FIRST_OUTPUT_TIMEOUT' : 'STREAM_IDLE_TIMEOUT'));
+  }
+});
 test('API diagnostics distinguish response headers and meaningful text', async t => {
   const phases:string[]=[];
   const base=await server(t,(_req,res)=>{
@@ -25,6 +53,17 @@ test('API diagnostics distinguish response headers and meaningful text', async t
   const adapter=createApiAdapter(credentials(base),60000,undefined,phase=>phases.push(phase));
   await adapter({chunk:{chunkId:'test',index:0,core:[],context:[],request:'synthetic'},profile,repair:false});
   assert.deepEqual(phases,['request','headers','first_text','last_text','received']);
+});
+test('raw heartbeat does not mark the API as receiving meaningful output', async t => {
+  let receiving=0;
+  const base=await server(t,(_req,res)=>{
+    res.writeHead(200,{'Content-Type':'text/event-stream'});
+    res.write(': heartbeat\n\n');
+    setTimeout(()=>res.end('data: [DONE]\n\n'),80);
+  });
+  const adapter=createApiAdapter(credentials(base),1000,()=>receiving++);
+  await assert.rejects(adapter({chunk:{chunkId:'test',index:0,core:[],context:[],request:'synthetic'},profile,repair:false}));
+  assert.equal(receiving,0);
 });
 function send(response: any, text: string, finish = 'stop') { response.writeHead(200, { 'Content-Type': 'text/event-stream' }); response.write(`data: ${JSON.stringify({ id: 'fixture', object: 'chat.completion.chunk', model: profile.model, choices: [{ index: 0, delta: { role: 'assistant', content: text }, finish_reason: null }] })}\n\n`); response.write(`data: ${JSON.stringify({ id: 'fixture', object: 'chat.completion.chunk', model: profile.model, choices: [{ index: 0, delta: {}, finish_reason: finish }] })}\n\n`); response.end('data: [DONE]\n\n'); }
 const valid = () => { const ref = { segmentId: source.segments[0].segmentId, startOffset: 0, endOffset: source.segments[0].text.length }; return JSON.stringify({ title: '笔记', sections: [{ heading: '章节', refs: [ref], items: [{ kind: 'point', text: '要点', refs: [ref], children: [] }] }] }); };
@@ -204,7 +243,7 @@ test('one file shares a request budget across format repair and truncation split
 test('whole-file deadline stops a waiting request and retains failure metrics',async t=>{
   const base=await server(t,(_req,res)=>{setTimeout(()=>{if(!res.destroyed)send(res,valid());},300);});
   let metrics:any;const began=performance.now();
-  await assert.rejects(analyzeWithApi(source,credentials(base),{deadlineMs:50,onMetrics:value=>{metrics=value;}}),(error:any)=>error.code==='TIMEOUT');
+  await assert.rejects(analyzeWithApi(source,credentials(base),{deadlineMs:50,onMetrics:value=>{metrics=value;}}),(error:any)=>error.code==='FILE_TIMEOUT');
   assert.ok(performance.now()-began<250);assert.equal(metrics.requests,1);assert.ok(metrics.apiMs>0);
 });
 test('range IDs distinguish disjoint ranges and context within the same Unicode segment',async t=>{
