@@ -2,6 +2,28 @@ import { test } from 'node:test';
 import { strict as assert } from 'node:assert';
 import { createOrganizationTasks, classifyDiagnosticError } from '../../src/main/organization-tasks.ts';
 
+test('both services retain comparable wait, reception and local processing durations', () => {
+  for (const service of ['api', 'subscription'] as const) {
+    let now = 100;
+    const tasks = createOrganizationTasks(() => now);
+    const id = tasks.start(service);
+    now = 110; tasks.event(id, {phase:'request'});
+    now = 120; tasks.event(id, {phase:'headers'});
+    now = 170; tasks.event(id, {phase:'first_text'});
+    now = 190; tasks.event(id, {phase:'received'});
+    now = 200; tasks.event(id, {phase:'validating'});
+    now = 240; tasks.event(id, {phase:'saving'});
+    now = 300; tasks.event(id, {phase:'saved'});
+    tasks.finish(id, 'succeeded');
+    const events = tasks.get(id)!.events;
+    const time = (phase:string) => events.find(event => event.phase === phase)!.elapsedMs;
+    assert.equal(time('first_text') - time('headers'), 50);
+    assert.equal(time('received') - time('first_text'), 20);
+    assert.equal(time('saving') - time('validating'), 40);
+    assert.equal(time('saved') - time('saving'), 60);
+  }
+});
+
 test('records timings without text and rejects late events after terminal state', () => {
   let now = 100;
   const tasks = createOrganizationTasks(() => now);

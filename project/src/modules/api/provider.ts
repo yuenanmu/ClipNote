@@ -101,7 +101,6 @@ export function createApiAdapter(credentials: ApiConfigInput, timeoutMs = 60000,
           }
         }
         const value = await stream.result();
-        if (!signal.aborted) diagnostic('received');
         return value;
       };
       const response = await waitForSignal(consume(), signal);
@@ -109,8 +108,9 @@ export function createApiAdapter(credentials: ApiConfigInput, timeoutMs = 60000,
       if (timeout.aborted) throw new ApiError('TIMEOUT');
       if (streamFailed && response.stopReason !== 'stop' && response.stopReason !== 'length') throw new ApiError('NETWORK');
       if (status === 400 || status === 404 || status === 422) throw new ApiError('INVALID_CONFIG'); if (status === 401) throw new ApiError('AUTH_FAILED'); if (status === 402) throw new ApiError('BALANCE'); if (status === 403) throw new ApiError('PERMISSION_DENIED'); if (status === 408) throw new ApiError('TIMEOUT'); if (status === 429) throw new ApiError('RATE_LIMIT'); if (status && status >= 500) throw new ApiError('SERVER_ERROR'); if (status && status >= 400) throw new ApiError('NETWORK');
-      if (response.stopReason === 'length') return { status: 'truncated', value: null };
+      if (response.stopReason === 'length') { diagnostic('received'); return { status: 'truncated', value: null }; }
       if (response.stopReason !== 'stop') throw new ApiError(status && status >= 200 && status < 300 ? 'INVALID_RESPONSE' : 'NETWORK');
+      diagnostic('received');
       const text = response.content.filter(part => part.type === 'text').map(part => part.text).join('').trim();
       if (!text || text.length > request.profile.outputCharBudget) throw new ApiError('INVALID_RESPONSE');
       return { status: 'completed', value: restoreReferences(text, compact.ids, compact.ranges) };

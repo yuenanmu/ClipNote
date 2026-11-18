@@ -44,6 +44,16 @@ test('subscription diagnostics follow the real desktop task through saving',{tim
  let failed;for(let i=0;i<100 && !failed;i++){data=await page.evaluate(()=>window.clipnote.organizationList());failed=data.value.find(record=>record.service==='subscription'&&record.status==='failed');if(!failed)await new Promise(resolve=>setTimeout(resolve,100));}
  assert.ok(failed,'failed task was not recorded');
  assert.equal(failed.error,'network');assert.ok(failed.events.some(event=>event.phase==='request'));assert.doesNotMatch(JSON.stringify(failed),/private remote error|synthetic-restart-secret/);
+ await app.evaluate(async({session})=>{const protocol=session.fromPartition('clipnote-subscription').protocol;protocol.unhandle('https');protocol.handle('https',async request=>{const url=new URL(request.url);if(url.hostname!=='api.openai.com')return new Response('',{status:403});if(url.pathname==='/v1/models')return Response.json({models:[{slug:'fixture',display_name:'Fixture',visibility:'list'}]});return new Response('data: '+JSON.stringify({type:'response.output_text.delta',delta:'partial private'})+'\n\n',{headers:{'Content-Type':'text/event-stream'}});});});
+ await panel.getByRole('button',{name:'检查资料'}).click();await panel.getByRole('button',{name:'确认发送'}).click();
+ let interrupted;for(let i=0;i<100 && !interrupted;i++){data=await page.evaluate(()=>window.clipnote.organizationList());interrupted=data.value.find(record=>record.service==='subscription'&&record.status==='failed'&&record.id!==failed.id);if(!interrupted)await new Promise(resolve=>setTimeout(resolve,100));}
+ assert.ok(interrupted,'interrupted task was not recorded');
+ const interruptedPhases=interrupted.events.map(event=>event.phase);
+ for(const phase of ['headers','first_text','last_text','failed'])assert.ok(interruptedPhases.includes(phase),phase);
+ assert.equal(interruptedPhases.filter(phase=>['succeeded','failed','cancelled'].includes(phase)).length,1);
+ assert.ok(!interruptedPhases.includes('received'));assert.ok(!interruptedPhases.includes('saving'));
+ assert.ok(interrupted.events.every(event=>Number.isFinite(event.elapsedMs)&&event.elapsedMs>=0));
+ assert.doesNotMatch(JSON.stringify(interrupted),/partial private|synthetic-restart-secret/);
  await app.evaluate(async({session})=>{const protocol=session.fromPartition('clipnote-subscription').protocol;protocol.unhandle('https');protocol.handle('https',async request=>{const url=new URL(request.url);if(url.hostname!=='api.openai.com')return new Response('',{status:403});if(url.pathname==='/v1/models')return Response.json({models:[{slug:'fixture',display_name:'Fixture',visibility:'list'}]});const encoder=new TextEncoder();return new Response(new ReadableStream({start(controller){controller.enqueue(encoder.encode('data: '+JSON.stringify({type:'response.output_text.delta',delta:'partial private'})+'\n\n'));},cancel(){}}),{headers:{'Content-Type':'text/event-stream'}});});});
  await panel.getByRole('button',{name:'检查资料'}).click();await panel.getByRole('button',{name:'确认发送'}).click();
  await panel.getByRole('button',{name:'停止',exact:true}).click();
