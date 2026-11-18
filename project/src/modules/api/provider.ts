@@ -91,8 +91,9 @@ export function createApiAdapter(credentials: ApiConfigInput, timeoutMs: number 
       signal.throwIfAborted();
       diagnostic('request');
       const stream = models.streamSimple(models.getModel('clipnote-api', config.model)!, { messages: [{ role: 'user', content: prompt, timestamp: Date.now() }] }, { maxTokens: config.maxTokens, maxRetries: 0, signal, fetch: async (input, init) => {
-        const result = await fetch(input, { ...init, redirect: 'error' }); status = result.status; diagnostic('headers');
+        const result = await fetch(input, { ...init, redirect: 'error' }); status = result.status;
         if (signal.aborted) { await result.body?.cancel(); signal.throwIfAborted(); }
+        diagnostic('headers');
         if (!result.body) return result;
         const reader = result.body.getReader(); let size = 0; const limit = Math.min(4 * 1024 * 1024, Math.max(1024 * 1024, request.profile.outputCharBudget * 64));
         const bounded = new ReadableStream<Uint8Array>({ async pull(controller) { try { const part = await reader.read(); if (part.done) { controller.close(); return; } size += part.value.byteLength; if (size > limit) { await reader.cancel(); controller.error(new Error('response limit exceeded')); return; } controller.enqueue(part.value); } catch (error) { streamFailed = true; controller.error(error); } }, cancel() { return reader.cancel(); } });

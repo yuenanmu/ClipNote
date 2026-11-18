@@ -39,6 +39,32 @@ test('API distinguishes waiting for output from stalled output', async t => {
     await assert.rejects(adapter({chunk:{chunkId:'test',index:0,core:[],context:[],request:'synthetic'},profile,repair:false}), (error:any) => error.code === (scenario === 'first' ? 'FIRST_OUTPUT_TIMEOUT' : 'STREAM_IDLE_TIMEOUT'));
   }
 });
+test('API request hard deadline stops a stream despite continued valid output', async t => {
+  const phases:string[]=[];
+  const base=await server(t,(_req,res)=>{
+    res.writeHead(200,{'Content-Type':'text/event-stream'});
+    const frame=`data: ${JSON.stringify({id:'fixture',object:'chat.completion.chunk',model:profile.model,choices:[{index:0,delta:{content:'x'},finish_reason:null}]})}\n\n`;
+    res.write(frame);
+    const timer=setInterval(()=>{if(!res.destroyed)res.write(frame);},20);
+    res.on('close',()=>clearInterval(timer));
+  });
+  const adapter=createApiAdapter(credentials(base),{firstOutputMs:500,idleMs:500,requestMs:350},undefined,phase=>phases.push(phase));
+  await assert.rejects(adapter({chunk:{chunkId:'test',index:0,core:[],context:[],request:'synthetic'},profile,repair:false}),(error:any)=>error.code==='REQUEST_TIMEOUT');
+  assert.ok(phases.includes('first_text'));assert.ok(!phases.includes('received'));
+});
+test('API ignores response headers arriving after cancellation', async t => {
+  const phases:string[]=[];
+  const mock=t.mock.method(globalThis,'fetch',async()=>{await new Promise(resolve=>setTimeout(resolve,120));return new Response('{}',{status:503});});
+  const controller=new AbortController();
+  try{
+    const adapter=createApiAdapter(credentials('http://127.0.0.1:1/v1'),1000,undefined,phase=>phases.push(phase));
+    const pending=adapter({chunk:{chunkId:'test',index:0,core:[],context:[],request:'synthetic'},profile,repair:false,signal:controller.signal});
+    await new Promise(resolve=>setTimeout(resolve,50));controller.abort();
+    await assert.rejects(pending,(error:any)=>error.code==='CANCELLED');
+    await new Promise(resolve=>setTimeout(resolve,150));
+    assert.ok(!phases.includes('headers'));
+  }finally{mock.mock.restore();}
+});
 test('API diagnostics distinguish response headers and meaningful text', async t => {
   const phases:string[]=[];
   const base=await server(t,(_req,res)=>{
