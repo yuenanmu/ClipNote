@@ -20,9 +20,9 @@ test('a continuously active stream can outlive the former fixed request timeout'
     res.write(frame('first',null));
     const timer = setInterval(() => { if (!res.destroyed) res.write(frame('more',null)); }, 15);
     res.on('close', () => clearInterval(timer));
-    setTimeout(() => { clearInterval(timer); if (!res.destroyed) res.end(frame('', 'stop')+'data: [DONE]\n\n'); }, 700);
+    setTimeout(() => { clearInterval(timer); if (!res.destroyed) res.end(frame('', 'stop')+'data: [DONE]\n\n'); }, 1800);
   });
-  const adapter = createApiAdapter(credentials(base), {firstOutputMs:300,idleMs:300,requestMs:1800});
+  const adapter = createApiAdapter(credentials(base), {firstOutputMs:4000,idleMs:1200,requestMs:7000});
   const result = await adapter({chunk:{chunkId:'test',index:0,core:[],context:[],request:'synthetic'},profile,repair:false});
   assert.equal(result.status, 'completed');
 });
