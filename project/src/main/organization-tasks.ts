@@ -5,12 +5,16 @@ export type {DiagnosticPhase} from '../contracts/organization-task.ts';
 type Terminal = DiagnosticTerminal;
 type Snapshot = OrganizationTaskSnapshot;
 const phases = new Set<DiagnosticPhase>(['preparing', 'request', 'headers', 'first_text', 'last_text', 'received', 'validating', 'staging', 'awaiting_save', 'saving', 'saved']);
-const errors = new Set(['network', 'timeout', 'authentication', 'permission', 'rate_limit', 'invalid_response', 'validation', 'saving', 'unknown']);
+const errors = new Set(['network', 'timeout', 'first_output_timeout', 'stream_idle_timeout', 'request_timeout', 'file_timeout', 'authentication', 'permission', 'rate_limit', 'invalid_response', 'validation', 'saving', 'unknown']);
 const maxEvents = 128;
 export function classifyDiagnosticError(error:unknown):string {
   const code = typeof error === 'object' && error !== null && 'code' in error ? (error as {code?:unknown}).code : undefined;
   switch (code) {
     case 'TIMEOUT': return 'timeout';
+    case 'FIRST_OUTPUT_TIMEOUT': return 'first_output_timeout';
+    case 'STREAM_IDLE_TIMEOUT': return 'stream_idle_timeout';
+    case 'REQUEST_TIMEOUT': return 'request_timeout';
+    case 'FILE_TIMEOUT': return 'file_timeout';
     case 'NETWORK': case 'SERVER_ERROR': case 'network_error': case 'stream_interrupted': return 'network';
     case 'AUTH_FAILED': case 'sign_in_required': return 'authentication';
     case 'PERMISSION_DENIED': case 'sharing_not_enabled': case 'subscription_sharing_user_not_eligible': return 'permission';

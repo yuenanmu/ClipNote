@@ -13,7 +13,7 @@ interface Dependencies {
   resetAnalysis?():void;
   preview(id: string, target: string): Promise<OutputPlan>;
   analyze(id: string, config: Config, signal: AbortSignal, plan: OutputPlan, report:(progress:BatchItem['progress'],timing?:BatchItem['timing'])=>void, diagnostic?:(phase:AnalysisDiagnosticPhase,ageMs?:number)=>void): Promise<{ markdown: string;timing?:BatchItem['timing'];reused?:boolean }>;
-  diagnostic?(sourceId:string): { event(phase:DiagnosticPhase,ageMs?:number):void; progress?(value:NonNullable<BatchItem['progress']>):void; finish(status:'succeeded'|'failed'|'cancelled',error?:string):void };
+  diagnostic?(sourceId:string): { id?:string; event(phase:DiagnosticPhase,ageMs?:number):void; progress?(value:NonNullable<BatchItem['progress']>):void; finish(status:'succeeded'|'failed'|'cancelled',error?:string):void };
   save(id: string, target: string, plan: OutputPlan, markdown: string): Promise<void>;
   lock?(plans: OutputPlan[]):()=>void;
   stage?(plan:OutputPlan,markdown:string):Promise<string>;
@@ -33,6 +33,7 @@ export function createBatchHandlers(deps: Dependencies): Record<'state' | 'prepa
       if(!pending.has(item.id)){item.timing=undefined;item.reused=false;}item.startedAt=Date.now();item.finishedAt=undefined;item.progress=undefined;
       item.status = 'running'; item.error = undefined; item.canRetrySave = false;
       const diagnostic = deps.diagnostic?.(item.id);
+      item.diagnosticId = diagnostic?.id;
       let saveStarted:number|undefined;
       let diagnosticError:string|undefined;
       try {

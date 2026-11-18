@@ -113,6 +113,10 @@ test('retains first and latest text timestamps when rapid chunks exceed event li
 });
 
 test('classifies known errors without retaining untrusted error details', () => {
+  assert.equal(classifyDiagnosticError({code:'FIRST_OUTPUT_TIMEOUT'}), 'first_output_timeout');
+  assert.equal(classifyDiagnosticError({code:'STREAM_IDLE_TIMEOUT'}), 'stream_idle_timeout');
+  assert.equal(classifyDiagnosticError({code:'REQUEST_TIMEOUT'}), 'request_timeout');
+  assert.equal(classifyDiagnosticError({code:'FILE_TIMEOUT'}), 'file_timeout');
   assert.equal(classifyDiagnosticError({code:'TIMEOUT',message:'private'}), 'timeout');
   assert.equal(classifyDiagnosticError({code:'stream_interrupted',message:'private'}), 'network');
   assert.equal(classifyDiagnosticError({code:'AUTH_FAILED'}), 'authentication');

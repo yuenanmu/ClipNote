@@ -183,7 +183,7 @@ app.whenReady().then(() => {
   const organizationTasks=createOrganizationTasks();
   const diagnostic=(service:'api'|'subscription',sourceId:string)=>{
     const taskId=organizationTasks.start(service,sourceId);
-    return {event:(phase:import('./organization-tasks.ts').DiagnosticPhase,ageMs?:number)=>organizationTasks.event(taskId,{phase,ageMs}),progress:(value:import('../contracts/analysis.ts').AnalysisProgress)=>organizationTasks.progress(taskId,value),
+    return {id:taskId,event:(phase:import('./organization-tasks.ts').DiagnosticPhase,ageMs?:number)=>organizationTasks.event(taskId,{phase,ageMs}),progress:(value:import('../contracts/analysis.ts').AnalysisProgress)=>organizationTasks.progress(taskId,value),
       finish:(status:'succeeded'|'failed'|'cancelled',error?:string)=>organizationTasks.finish(taskId,status,error),pending:(resultId:string)=>organizationTasks.pending(taskId,resultId)};
   };
   ipcMain.handle('organization:list',(event,...args)=>trusted(event) && args.length===0 ? {status:'ok',value:organizationTasks.list()} : {status:'error',error:{code:'FORBIDDEN_REQUEST',message:'请求无效。'}});

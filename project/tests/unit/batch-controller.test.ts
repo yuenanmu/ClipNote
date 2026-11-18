@@ -4,6 +4,15 @@ import { createBatchHandlers } from '../../src/main/batch-controller.ts';
 const ids=['11111111-1111-4111-8111-111111111111','22222222-2222-4222-8222-222222222222'];
 const target='33333333-3333-4333-8333-333333333333', config={baseUrl:'https://fixture.invalid',model:'fixture',instructions:''};
 const tick=()=>new Promise(resolve=>setTimeout(resolve,5));
+test('batch retry exposes the diagnostic ID of the current attempt',async()=>{
+ let attempt=0;
+ const h=createBatchHandlers({isTrustedSender:()=>true,config:async()=>config,preview:async(id:string)=>({sourcePath:id,notePath:id+'.md',name:'a.md',exists:false}),
+  diagnostic:()=>({id:`attempt-${++attempt}`,event:()=>{},finish:()=>{}}),
+  analyze:async()=>{if(attempt===1)throw new Error('failed');return {markdown:'# test'};},save:async()=>{}});
+ await h.prepare('trusted',[ids[0]],target,config);await h.start('trusted');
+ const first=await until(h,'done');assert.equal(first.items[0].diagnosticId,'attempt-1');
+ await h.retry('trusted',[ids[0]]);const second=await until(h,'done');assert.equal(second.items[0].diagnosticId,'attempt-2');
+});
 test('batch emits one diagnostic lifecycle including failed save',async()=>{
   const events:string[]=[];
   const h=createBatchHandlers({isTrustedSender:()=>true,config:async()=>config,preview:async(id:string)=>({sourcePath:id,notePath:id+'.md',name:'a.md',exists:false}),
