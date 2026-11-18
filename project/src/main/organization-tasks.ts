@@ -103,10 +103,17 @@ export function createOrganizationTasks(clock: () => number = () => performance.
     },
     get(id: string): Snapshot | undefined {
       const record = records.get(id);
-      return record ? structuredClone(record.snapshot) : undefined;
+      if (!record) return undefined;
+      const snapshot=structuredClone(record.snapshot);
+      snapshot.elapsedMs=snapshot.status==='running' ? Math.max(0,clock()-record.start) : snapshot.events.at(-1)?.elapsedMs ?? 0;
+      return snapshot;
     },
     list(): Snapshot[] {
-      return Array.from(records.values(), record => structuredClone(record.snapshot));
+      return Array.from(records.values(), record => {
+        const snapshot=structuredClone(record.snapshot);
+        snapshot.elapsedMs=snapshot.status==='running' ? Math.max(0,clock()-record.start) : snapshot.events.at(-1)?.elapsedMs ?? 0;
+        return snapshot;
+      });
     },
   };
 }

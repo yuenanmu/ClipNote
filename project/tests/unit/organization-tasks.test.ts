@@ -1,6 +1,13 @@
 import { test } from 'node:test';
 import { strict as assert } from 'node:assert';
 import { createOrganizationTasks, classifyDiagnosticError } from '../../src/main/organization-tasks.ts';
+test('query returns current elapsed time even when no new event occurs',()=>{
+ let now=100;const tasks=createOrganizationTasks(()=>now);const id=tasks.start('api');
+ now=150;tasks.event(id,{phase:'request'});now=250;
+ assert.equal(tasks.get(id)?.elapsedMs,150);
+ tasks.finish(id,'failed','timeout');now=500;
+ assert.equal(tasks.get(id)?.elapsedMs,150);
+});
 
 test('both services retain comparable wait, reception and local processing durations', () => {
   for (const service of ['api', 'subscription'] as const) {

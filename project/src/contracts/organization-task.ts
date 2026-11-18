@@ -6,6 +6,7 @@ export interface OrganizationTaskSnapshot {
   id: string;
   sourceId?: string;
   revision: number;
+  elapsedMs?: number;
   requests: number;
   chunk?: {index:number; total?:number};
   service: 'api' | 'subscription';

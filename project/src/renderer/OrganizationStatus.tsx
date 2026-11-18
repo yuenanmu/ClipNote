@@ -48,7 +48,7 @@ export function OrganizationStatus({id,onStatus}:{id?:string;onStatus?:(status:O
   const lastWork=[...snapshot.events].reverse().find(item=>!['failed','cancelled','succeeded'].includes(item.phase));
   if(!event)return null;
   return <div aria-label="整理阶段">
-    <p>{labels[event.phase]}{snapshot.status==='failed' && lastWork ? ` · 上一阶段：${labels[lastWork.phase]}` : ''} · 已用 {((event.elapsedMs+(snapshot.status==='running'?Math.max(0,clock-observed.current.at):0))/1000).toFixed(1)} 秒</p>
+    <p>{labels[event.phase]}{snapshot.status==='failed' && lastWork ? ` · 上一阶段：${labels[lastWork.phase]}` : ''} · 已用 {((snapshot.elapsedMs ?? (event.elapsedMs+(snapshot.status==='running'?Math.max(0,clock-observed.current.at):0)))/1000).toFixed(1)} 秒</p>
     {snapshot.status==='running' && <small>单次请求最多 {STREAM_DEADLINE_DEFAULTS.requestMs/1000} 秒，首个有效输出等待上限 {STREAM_DEADLINE_DEFAULTS.firstOutputMs/1000} 秒，输出停滞上限 {STREAM_DEADLINE_DEFAULTS.idleMs/1000} 秒。整份资料另有处理上限。</small>}
     {snapshot.error && <p>{reasons[snapshot.error] ?? '整理未完成'}</p>}
   </div>;
