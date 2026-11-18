@@ -16,13 +16,14 @@ const reasons:Record<string,string> = {
   validation:'内容校验失败', invalid_response:'服务响应无效', unknown:'整理未完成',
 };
 
-export function OrganizationStatus({id}:{id?:string}) {
+export function OrganizationStatus({id,onStatus}:{id?:string;onStatus?:(status:OrganizationTaskSnapshot['status']|undefined)=>void}) {
   const [snapshot,setSnapshot]=useState<OrganizationTaskSnapshot>();
   const [clock,setClock]=useState(0);
   const observed=useRef({revision:-1,event:'',at:0});
   useEffect(()=>{
     let alive=true;
     setSnapshot(undefined);
+    onStatus?.(undefined);
     observed.current={revision:-1,event:'',at:performance.now()};
     if(!id)return;
     const refresh=async()=>{
@@ -33,6 +34,7 @@ export function OrganizationStatus({id}:{id?:string}) {
           const key=last ? `${last.phase}:${last.elapsedMs}` : '';
           observed.current={revision:result.value.revision,event:key,at:key===observed.current.event?observed.current.at:performance.now()};
           setSnapshot(result.value);
+          onStatus?.(result.value.status);
           setClock(performance.now());
         }
       } catch { if(alive)setSnapshot(undefined); }
@@ -40,7 +42,7 @@ export function OrganizationStatus({id}:{id?:string}) {
     void refresh();
     const timer=setInterval(()=>void refresh(),500);
     return ()=>{alive=false;clearInterval(timer);};
-  },[id]);
+  },[id,onStatus]);
   if(!snapshot || snapshot.id!==id)return null;
   const event=snapshot.events.at(-1);
   const lastWork=[...snapshot.events].reverse().find(item=>!['failed','cancelled','succeeded'].includes(item.phase));
