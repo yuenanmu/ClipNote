@@ -54,6 +54,26 @@ test('batch cancel stops queued files and late results are not saved', async () 
   await h.prepare('trusted',ids,target,config); await h.start('trusted'); await until(h,'running'); await h.cancel('trusted'); release(); const state=await until(h,'cancelled');
   assert.equal(calls,1); assert.equal(saved,0); assert.equal(state.items[1].status,'cancelled');
 });
+test('cancelling during a committed save reports the actual saved item',async()=>{
+ let release!:()=>void,entered!:()=>void;
+ const started=new Promise<void>(resolve=>{entered=resolve;});
+ const terminal:string[]=[];
+ const h=createBatchHandlers({isTrustedSender:()=>true,config:async()=>config,preview:async(id:string)=>({sourcePath:id,notePath:id+'.md',name:'a.md',exists:false}),
+  diagnostic:()=>({event:()=>{},finish:status=>terminal.push(status)}),analyze:async()=>({markdown:'# note'}),
+  save:async()=>{entered();await new Promise<void>(resolve=>{release=resolve;});}});
+ await h.prepare('trusted',[ids[0]],target,config);await h.start('trusted');await started;
+ await h.cancel('trusted');release();const state=await until(h,'cancelled');
+ assert.equal(state.items[0].status,'succeeded');assert.deepEqual(terminal,['succeeded']);
+});
+test('cancelling while staging does not start the save',async()=>{
+ let release!:()=>void,entered!:()=>void,saved=0;
+ const started=new Promise<void>(resolve=>{entered=resolve;});
+ const h=createBatchHandlers({isTrustedSender:()=>true,config:async()=>config,preview:async(id:string)=>({sourcePath:id,notePath:id+'.md',name:'a.md',exists:false}),
+  analyze:async()=>({markdown:'# note'}),stage:async()=>{entered();await new Promise<void>(resolve=>{release=resolve;});return ids[1];},save:async()=>{saved++;}});
+ await h.prepare('trusted',[ids[0]],target,config);await h.start('trusted');await started;
+ await h.cancel('trusted');release();const state=await until(h,'cancelled');
+ assert.equal(saved,0);assert.equal(state.items[0].status,'cancelled');
+});
 test('retrying a failed save reuses generated Markdown without another request', async () => {
   let calls=0, saves=0; const h=createBatchHandlers({ isTrustedSender:()=>true, config:async()=>config, preview:async(id:string)=>({sourcePath:id,notePath:id+'.md',name:id+'.md',exists:false}),
     analyze:async()=>{calls++; return {markdown:'# 保存结果'};}, save:async(_id:string,_target:string,_plan:any,text:string)=>{ assert.equal(text,'# 保存结果'); if(++saves===1) throw new Error('disk full'); } });
