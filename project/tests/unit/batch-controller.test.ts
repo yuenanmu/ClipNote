@@ -83,6 +83,21 @@ test('cancelling while an actual workspace write completes retains its saved res
  await h.cancel('trusted');release();const state=await until(h,'cancelled');
  assert.equal(state.items[0].status,'succeeded');assert.equal(await readFile(join(notes,'source.md'),'utf8'),'# synthetic note');
 });
+test('a target conflict during cancellation keeps the generated result retryable',async t=>{
+ const base=join(process.cwd(),'.local','test-artifacts');await mkdir(base,{recursive:true});
+ const dir=await mkdtemp(join(base,'batch-cancel-conflict-'));t.after(()=>rm(dir,{recursive:true,force:true}));
+ const sources=join(dir,'sources'),notes=join(dir,'notes');await mkdir(sources);await mkdir(notes);await writeFile(join(sources,'source.txt'),'synthetic source');
+ const workspace=new WorkspaceFiles(join(dir,'state'));
+ const sourceRoot=await workspace.choose('source',sources),noteRoot=await workspace.choose('notes',notes);
+ const entry=(await workspace.list('source',sourceRoot.id)).entries[0];
+ let release!:()=>void,entered!:()=>void;const started=new Promise<void>(resolve=>{entered=resolve;});
+ const h=createBatchHandlers({isTrustedSender:()=>true,config:async()=>config,preview:(id,folder)=>workspace.previewOutput(id,folder),
+  analyze:async()=>({markdown:'# synthetic note'}),save:async(id,folder,plan,text)=>{entered();await new Promise<void>(resolve=>{release=resolve;});await workspace.writeOutput(id,folder,plan,text);}});
+ await h.prepare('trusted',[entry.id],noteRoot.id,config);await h.start('trusted');await started;
+ await writeFile(join(notes,'source.md'),'external edit');await h.cancel('trusted');release();const state=await until(h,'cancelled');
+ assert.equal(state.items[0].status,'failed');assert.equal(state.items[0].canRetrySave,true);
+ assert.match(state.items[0].error,/已存在|已更改/);assert.equal(await readFile(join(notes,'source.md'),'utf8'),'external edit');
+});
 test('cancelling while staging does not start the save',async()=>{
  let release!:()=>void,entered!:()=>void,saved=0;
  const started=new Promise<void>(resolve=>{entered=resolve;});

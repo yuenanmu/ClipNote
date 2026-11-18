@@ -45,7 +45,7 @@ export function createBatchHandlers(deps: Dependencies): Record<'state' | 'prepa
         if(signal.aborted){item.status='cancelled';continue;}
         await deps.save(item.id, target, plans.get(item.id)!, markdown);
         const draft=drafts.get(item.id);if(draft && deps.complete)await deps.complete(draft);drafts.delete(item.id);pending.delete(item.id); item.status = 'succeeded';diagnostic?.event('saved');
-      } catch (error) { item.status = signal.aborted ? 'cancelled' : 'failed'; if (!signal.aborted) { diagnosticError=saveStarted!==undefined?'saving':classifyDiagnosticError(error);item.error = safe(error); item.canRetrySave = pending.has(item.id); } }
+      } catch (error) { item.status = signal.aborted && saveStarted===undefined ? 'cancelled' : 'failed'; if (item.status==='failed') { diagnosticError=saveStarted!==undefined?'saving':classifyDiagnosticError(error);item.error = safe(error); item.canRetrySave = pending.has(item.id); } }
       finally{diagnostic?.finish(item.status==='succeeded'?'succeeded':item.status==='cancelled'?'cancelled':'failed',diagnosticError);item.finishedAt=Date.now();if(item.timing && saveStarted!==undefined)item.timing.saveMs+=performance.now()-saveStarted;}
     }
     release?.();release=undefined;state.status = signal.aborted ? 'cancelled' : 'done'; abort = undefined;
