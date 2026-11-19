@@ -13,7 +13,7 @@ export class SmartSubJournal {
   constructor(directory:string){this.directory=resolve(directory);}
   private path(id:string){if(!isUuid(id))throw new Error('任务标识无效。');return join(this.directory,id+'.json');}
   private serial<T>(action:()=>Promise<T>):Promise<T>{const next=this.queue.then(action,action);this.queue=next.catch(()=>{});return next;}
-  async prepare(url:string,cachePath:string,requestId=randomUUID(),binding?:string):Promise<SmartSubRecord>{
+  async prepare(url:string,cachePath:string,requestId:string=randomUUID(),binding?:string):Promise<SmartSubRecord>{
     const input=makeDownloadRequest(url,cachePath,requestId);
     if(binding!==undefined && !/^[a-f0-9]{64}$/.test(binding))throw new Error('SmartSub 身份无效。');
     const value:SmartSubRecord={version:1,requestId,inputHash:digest(JSON.stringify(input.config)),status:'prepared',...(binding?{binding}:{})};

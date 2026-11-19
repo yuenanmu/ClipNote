@@ -69,7 +69,11 @@ test('Markmap remains readable and split reading keeps independent view state wi
     const scale = await canvas().getAttribute('data-scale'), body = page.locator('.reader-scroll'), scroll = await body.evaluate(e => e.scrollTop);
     const box = await separator.boundingBox(); await page.mouse.move(box.x + box.width / 2, box.y + 100); await page.mouse.down(); await page.mouse.move(box.x + 100, box.y + 100); await page.mouse.up();
     assert.notEqual(await ratio(), '40'); assert.equal(await canvas().getAttribute('data-scale'), scale);
-    const afterScroll=await body.evaluate(e=>({top:e.scrollTop,max:e.scrollHeight-e.clientHeight}));assert.ok(Math.abs(afterScroll.top-Math.min(scroll,afterScroll.max))<1);
+    const afterScroll=await body.evaluate(e=>{
+      const top=e.scrollTop;e.scrollTop=e.scrollHeight;
+      const max=e.scrollTop;e.scrollTop=top;
+      return {top,max};
+    });assert.ok(Math.abs(afterScroll.top-Math.min(scroll,afterScroll.max))<1, JSON.stringify({before:scroll,after:afterScroll}));
     await separator.focus(); await page.keyboard.press('Home');
     assert.ok(await page.locator('.reader-scroll').evaluate(e => e.getBoundingClientRect().width) >= 280);
     await page.keyboard.press('End'); assert.ok(await page.locator('.mindmap-holder').evaluate(e => e.getBoundingClientRect().width) >= 280);

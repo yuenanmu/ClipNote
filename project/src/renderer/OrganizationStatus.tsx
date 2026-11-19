@@ -50,13 +50,15 @@ export function OrganizationStatus({id,onStatus,fallback,error,timing}:{id?:stri
   const current = snapshot?.id === id ? snapshot : undefined;
   const event = current?.events.at(-1);
   const lastWork = current?.events.slice().reverse().find(item=>!['failed','cancelled','succeeded'].includes(item.phase));
-  const phase = event ? labels[event.phase] : fallback;
+  const chunks = current?.chunkProgress;
+  const phase = chunks && chunks.completed === chunks.total && event?.phase === 'validating' ? '正在合并' : event ? labels[event.phase] : fallback;
   if (!phase) return null;
   const reason = current?.error ? reasons[current.error] ?? error ?? '整理未完成' : error;
   const elapsed = current?.elapsedMs ?? (event ? event.elapsedMs + (current?.status === 'running' ? Math.max(0,clock-observed.current.at) : 0) : 0);
   return <div className="organization-status" aria-label="整理阶段">
     <div role="status"><strong>{phase}</strong></div>
-    {(current?.status === 'running' || (!current && fallback === '正在整理')) && <progress aria-label="整理进行中" />}
+    {chunks ? <label className="organization-chunks">已完成 {chunks.completed}/{chunks.total} 块<progress value={chunks.completed} max={chunks.total} /></label>
+      : (current?.status === 'running' || (!current && fallback === '正在整理')) && <progress aria-label="整理进行中" />}
     {reason && <p role="alert">{reason}</p>}
     {(event || timing) && <details>
       <summary>详细信息</summary>

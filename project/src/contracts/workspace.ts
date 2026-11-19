@@ -25,7 +25,7 @@ export interface WorkspaceActions {
 }
 export type WorkspaceAction = keyof WorkspaceActions;
 export interface WorkspaceChange { kind: WorkspaceKind; revision: number }
-export interface BatchConfig { baseUrl: string; model: string; instructions: string }
+export interface BatchConfig { profile?: import('./api.ts').ApiProfileRef; baseUrl: string; model: string; instructions: string }
 export interface BatchItem {
   diagnosticId?: string;
   reused?:boolean; startedAt?:number; finishedAt?:number; progress?:import("./analysis.ts").AnalysisProgress;
@@ -33,7 +33,7 @@ export interface BatchItem {
   status: 'queued' | 'running' | 'succeeded' | 'failed' | 'cancelled'; error?: string; canRetrySave?: boolean;
   timing?:{prepareMs:number;apiMs:number;localMs:number;saveMs:number;requests:number};
 }
-export interface BatchState { status: 'idle' | 'ready' | 'running' | 'done' | 'cancelled'; items: BatchItem[]; baseUrl?: string; model?: string }
+export interface BatchState { status: 'idle' | 'ready' | 'running' | 'done' | 'cancelled'; items: BatchItem[]; baseUrl?: string; model?: string; serviceName?: string }
 export interface SavedResult { id: string; name: string; sourceName: string; createdAt: string }
 export interface SavePreview { token: string; name: string; path: string; overwrite: boolean }
 export interface ExportItem { id: string; title: string; name: string; modified: boolean; createdAt: string }

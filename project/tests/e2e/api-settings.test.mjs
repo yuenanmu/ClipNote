@@ -38,6 +38,12 @@ test('API settings save an encrypted key and only send a synthetic test when exp
   await page.screenshot({ path: join(artifacts, 'api-settings-models.png') });
   await page.getByRole('button', { name: '测试连接', exact: true }).click(); await page.locator('.api-panel .notice').waitFor(); assert.equal(await page.locator('.api-panel .notice').innerText(), '连接测试通过');
   assert.equal(calls, 1); assert.equal(received.auth, `Bearer ${secret}`); assert.ok(JSON.stringify(received.body).includes('合成连接测试'));
+  await page.getByRole('button',{name:'添加服务',exact:true}).click();
+  await page.getByLabel('服务地址').fill(base);
+  assert.equal(await page.getByRole('button',{name:'获取模型列表'}).isDisabled(),true);
+  const result=await page.evaluate(baseUrl=>window.clipnote.apiModels({baseUrl,apiKey:'',profile:null}),base);
+  assert.equal(result.error.code,'KEY_REQUIRED');
+  assert.equal(modelCalls,2);
 });
 
 test('legacy synchronous ciphertext remains readable with asynchronous safeStorage and new operations emit no deprecation warnings', { timeout: 120000 }, async t => {

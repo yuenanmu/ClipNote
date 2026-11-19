@@ -1,5 +1,7 @@
+import type { AnalysisChunkProgress } from '../contracts/analysis.ts';
 import type { SourceSnapshot } from '../contracts/source.ts';
-import type { ApiConfigInput } from '../contracts/api.ts';
+import {isApiProfileRef} from '../modules/api/config.ts';
+import type { ApiConfigInput,ApiProfileRef } from '../contracts/api.ts';
 import type { AnalysisOptions, AnalysisResult } from '../contracts/analysis.ts';
 import type { SavedRevision } from '../contracts/storage.ts';
 import type { WorkflowResult, WorkflowState } from '../contracts/workflow.ts';
@@ -8,12 +10,13 @@ import { StorageError } from '../modules/storage/errors.ts';
 import { AnalysisError } from '../modules/analysis/errors.ts';
 import { ApiError } from '../modules/api/errors.ts';
 import {classifyDiagnosticError,type DiagnosticPhase} from './organization-tasks.ts';
+type ExpectedService={baseUrl:string;model:string;instructions?:string;profile?:ApiProfileRef};
 interface Dependencies {
   isTrustedSender(event: unknown): boolean; source(id: string): SourceSnapshot | undefined;
-  credentials(): Promise<ApiConfigInput>; hasDirectory(): Promise<boolean>;
+  credentials(profile?:ApiProfileRef): Promise<ApiConfigInput>; hasDirectory(): Promise<boolean>;
   analyze(source: SourceSnapshot['document'], credentials: ApiConfigInput, options: AnalysisOptions): Promise<AnalysisResult>;
   save(snapshot: SourceSnapshot, result: AnalysisResult): Promise<SavedRevision>; resume(id: string): Promise<SavedRevision>;
-  diagnostic?(sourceId:string):{id?:string;event(phase:DiagnosticPhase,ageMs?:number):void;finish(status:'succeeded'|'failed'|'cancelled',error?:string):void};
+  diagnostic?(sourceId:string):{id?:string;event(phase:DiagnosticPhase,ageMs?:number):void;chunkProgress?(value:AnalysisChunkProgress):void;finish(status:'succeeded'|'failed'|'cancelled',error?:string):void};
 }
 export function createWorkflowHandlers(deps: Dependencies): Record<'state' | 'start' | 'cancel' | 'retry', (event: unknown, ...args: unknown[]) => Promise<WorkflowResult>> {
   let state: WorkflowState = { status: 'idle', completedChunks: 0 }; let abort: AbortController | undefined;
@@ -29,28 +32,28 @@ export function createWorkflowHandlers(deps: Dependencies): Record<'state' | 'st
     catch (error) { if (error instanceof StorageError && error.draftId) pending!.draftId = error.draftId; state = { ...state, status: 'failed', error: safe(error), canRetrySave: true };diagnostic?.finish('failed','saving'); }
     finally { if (state.timing) state = { ...state, timing: { ...state.timing, saveMs: state.timing.saveMs + performance.now() - started } }; }
   };
-  const run = async (source: SourceSnapshot, signal: AbortSignal, expected: { baseUrl: string; model: string; instructions?: string },diagnostic?:ReturnType<NonNullable<Dependencies['diagnostic']>>) => {
+  const run = async (source: SourceSnapshot, signal: AbortSignal, expected: ExpectedService,diagnostic?:ReturnType<NonNullable<Dependencies['diagnostic']>>) => {
     const started = performance.now();
     try {
-      if (!await deps.hasDirectory()) throw new StorageError('DIRECTORY_REQUIRED');
-      const credentials = await deps.credentials(); if (signal.aborted) throw new AnalysisError('CANCELLED');
+      const credentials = await deps.credentials(expected.profile);
+      if (!await deps.hasDirectory()) throw new StorageError('DIRECTORY_REQUIRED'); if (signal.aborted) throw new AnalysisError('CANCELLED');
       if (credentials.baseUrl !== expected.baseUrl || credentials.model !== expected.model) { state = { ...state, status: 'failed', error: { code: 'CONFIG_CHANGED', message: '服务配置已改变，请重新确认发送对象。' } }; diagnostic?.finish('failed','unknown');return; }
       const setupMs = performance.now() - started;
-      const result = await deps.analyze(source.document, credentials, { signal, instructions: expected.instructions, onDiagnostic:(phase,ageMs)=>diagnostic?.event(phase,ageMs), onMetrics: metrics => { if (state.timing) state = { ...state, timing: { ...state.timing, ...metrics, prepareMs: setupMs + metrics.prepareMs } }; }, onCheckpoint: () => { state = { ...state, completedChunks: state.completedChunks + 1 }; } });
+      const result = await deps.analyze(source.document, credentials, { signal, instructions: expected.instructions, onChunkProgress:value=>diagnostic?.chunkProgress?.(value), onDiagnostic:(phase,ageMs)=>diagnostic?.event(phase,ageMs), onMetrics: metrics => { if (state.timing) state = { ...state, timing: { ...state.timing, ...metrics, prepareMs: setupMs + metrics.prepareMs } }; }, onCheckpoint: () => { state = { ...state, completedChunks: state.completedChunks + 1 }; } });
       if (signal.aborted) throw new AnalysisError('CANCELLED'); pending = { snapshot: source, result }; await publish(diagnostic);
     } catch (error) { state = { ...state, status: signal.aborted ? 'cancelled' : 'failed', error: signal.aborted ? undefined : safe(error) }; diagnostic?.finish(signal.aborted?'cancelled':'failed',signal.aborted?undefined:classifyDiagnosticError(error)); }
     finally { abort = undefined; }
   };
   const handler = (action: 'state' | 'start' | 'cancel' | 'retry') => async (event: unknown, ...args: unknown[]): Promise<WorkflowResult> => {
     const expected = args[1] as Record<string, unknown> | undefined;
-    if (!deps.isTrustedSender(event) || (action === 'start' ? args.length !== 2 || !isSourceId(args[0]) || !expected || typeof expected !== 'object' || !['baseUrl,model', 'baseUrl,instructions,model'].includes(Object.keys(expected).sort().join(',')) || typeof expected.baseUrl !== 'string' || typeof expected.model !== 'string' || expected.baseUrl.length > 2048 || expected.model.length > 128 || (expected.instructions !== undefined && (typeof expected.instructions !== 'string' || expected.instructions.length > 1000 || /[\x00-\x08\x0b\x0c\x0e-\x1f]/.test(expected.instructions))) : args.length !== 0)) return errorResult('INVALID_REQUEST', '无法执行此分析请求。');
+    if (!deps.isTrustedSender(event) || (action === 'start' ? args.length !== 2 || !isSourceId(args[0]) || !expected || typeof expected !== 'object' || !['baseUrl,model','baseUrl,instructions,model','baseUrl,model,profile','baseUrl,instructions,model,profile'].includes(Object.keys(expected).sort().join(',')) || ('profile' in expected && !isApiProfileRef(expected.profile)) || typeof expected.baseUrl !== 'string' || typeof expected.model !== 'string' || expected.baseUrl.length > 2048 || expected.model.length > 128 || (expected.instructions !== undefined && (typeof expected.instructions !== 'string' || expected.instructions.length > 1000 || /[\x00-\x08\x0b\x0c\x0e-\x1f]/.test(expected.instructions))) : args.length !== 0)) return errorResult('INVALID_REQUEST', '无法执行此分析请求。');
     if (action === 'state') return { status: 'ok', value: snapshot() };
     if (action === 'cancel') { if (state.status === 'running') abort?.abort(); return { status: 'ok', value: snapshot() }; }
     if (['running', 'saving'].includes(state.status)) return errorResult('BUSY', '已有分析或保存正在进行。');
     if (action === 'retry') { if (!pending) return errorResult('INVALID_REQUEST', '没有待重试的保存结果。'); const diagnostic=deps.diagnostic?.(pending.snapshot.document.sourceId);state={...state,diagnosticId:diagnostic?.id};void publish(diagnostic); return { status: 'ok', value: snapshot() }; }
     if (pending) return errorResult('SAVE_PENDING', '请先重试保存已完成的结果。');
     const source = deps.source(args[0] as string); if (!source) return errorResult('INVALID_REQUEST', '来源已过期，请重新导入。');
-    const diagnostic=deps.diagnostic?.(source.document.sourceId); abort = new AbortController(); state = { status: 'running', completedChunks: 0, diagnosticId:diagnostic?.id, sourceId: source.document.sourceId, timing: { prepareMs: 0, apiMs: 0, localMs: 0, saveMs: 0, requests: 0 } }; void run(source, abort.signal, expected as { baseUrl: string; model: string; instructions?: string },diagnostic);
+    const diagnostic=deps.diagnostic?.(source.document.sourceId); abort = new AbortController(); state = { status: 'running', completedChunks: 0, diagnosticId:diagnostic?.id, sourceId: source.document.sourceId, timing: { prepareMs: 0, apiMs: 0, localMs: 0, saveMs: 0, requests: 0 } }; void run(source, abort.signal, expected as ExpectedService,diagnostic);
     return { status: 'ok', value: snapshot() };
   };
   return { state: handler('state'), start: handler('start'), cancel: handler('cancel'), retry: handler('retry') };

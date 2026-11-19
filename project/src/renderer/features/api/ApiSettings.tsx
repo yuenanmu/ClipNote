@@ -1,32 +1,109 @@
 import { useEffect, useState } from 'react';
-import type { ApiState } from '../../../contracts/api.ts';
+import type { ApiProfileView, ApiProfilesView } from '../../../contracts/api.ts';
+import { unwrap } from '../../workspace-api.ts';
 import './api.css';
 
-export function ApiSettings({ onBack, embedded=false }: { onBack(): void; embedded?:boolean }) {
-  const [saved, setSaved] = useState<ApiState>({ configured: false });
-  const [baseUrl, setBaseUrl] = useState(''); const [model, setModel] = useState(''); const [apiKey, setApiKey] = useState('');
-  const [contextWindow, setContextWindow] = useState(8192); const [maxTokens, setMaxTokens] = useState(2048);
-  const [busy, setBusy] = useState(true); const [testing, setTesting] = useState(false);
-  const [notice, setNotice] = useState<{ text: string; error?: boolean }>();
-  const [models, setModels] = useState<string[]>([]); const [modelsFor, setModelsFor] = useState('');
-  const [keyCleared, setKeyCleared] = useState(false); const [listing, setListing] = useState(false);
-  const changeBaseUrl = (next: string) => { if (next !== baseUrl) { if (apiKey) setKeyCleared(true); setApiKey(''); setModels([]); setModelsFor(''); } setBaseUrl(next); };
-  useEffect(() => { let active = true; window.clipnote.apiState().then(result => { if (!active) return; if (result.status === 'error') { setNotice({ text: result.error.message, error: true }); return; } setSaved(result.value); if (result.value.configured) { setBaseUrl(result.value.baseUrl); setModel(result.value.model); setContextWindow(result.value.contextWindow); setMaxTokens(result.value.maxTokens); } }).catch(() => { if (active) setNotice({ text: '无法读取 API 设置。', error: true }); }).finally(() => { if (active) setBusy(false); }); return () => { active = false; }; }, []);
-  const changed = !saved.configured || baseUrl.replace(/\/$/, '') !== saved.baseUrl || model !== saved.model || contextWindow !== saved.contextWindow || maxTokens !== saved.maxTokens || !!apiKey;
-  const save = async () => { if (busy) return; setBusy(true); setNotice(undefined); try { const result = await window.clipnote.apiSave({ baseUrl, model, apiKey, contextWindow, maxTokens }); if (result.status === 'error') { setNotice({ text: result.error.message, error: true }); return; } setSaved(result.value); setApiKey(''); if (result.value.configured) setBaseUrl(result.value.baseUrl); setNotice({ text: '设置已安全保存' }); } catch { setNotice({ text: '保存失败，请重试。', error: true }); } finally { setBusy(false); } };
-  const testConnection = async () => { if (busy || changed) return; setBusy(true); setTesting(true); setNotice(undefined); try { const result = await window.clipnote.apiTest(); setNotice(result.status === 'ok' ? { text: '连接测试通过' } : { text: result.error.message, error: true }); } catch { setNotice({ text: '连接测试失败，请重试。', error: true }); } finally { setBusy(false); setTesting(false); } };
-  const fetchModels = async () => { if (busy) return; setBusy(true); setTesting(true); setListing(true); setNotice(undefined); setModels([]); setModelsFor(''); try { const result = await window.clipnote.apiModels({ baseUrl, apiKey }); if (result.status === 'error') { setNotice({ text: result.error.message, error: true }); return; } setModels(result.value); setModelsFor(baseUrl); setNotice({ text: result.value.length ? `已获取 ${result.value.length} 个模型，请选择。` : '服务未返回模型，请手动填写。' }); } catch { setNotice({ text: '获取模型失败，请检查服务地址和网络。', error: true }); } finally { setBusy(false); setTesting(false); setListing(false); } };
-  const wrongDeepSeek = /^https:\/\/platform\.deepseek\.com\/?$/i.test(baseUrl.trim());
-  return <div className={embedded?"api-embedded":"reader-shell"}>{!embedded && <aside className="reader-outline"><div className="reader-brand">ClipNote<span>服务与模型</span></div><button className="reader-back" aria-label="返回文件工作台" disabled={busy} onClick={onBack}>← 返回文件工作台</button><div className="api-sidebar-current">API 设置</div><p className="reader-offline">本地保存 · 主动连接</p></aside>}<main className="api-settings"><header><div><p className="eyebrow">工作台 / 服务设置</p><h1>API 设置</h1><p>配置 OpenAI 兼容服务，用于后续整理资料。</p></div></header>
-    <div className="api-panel"><h2>服务与模型</h2><p>密钥由系统加密保存在本机。更改服务地址时，请重新输入该服务的密钥。</p>
-      <label>服务地址<input aria-label="服务地址" value={baseUrl} onChange={e => changeBaseUrl(e.target.value)} placeholder="https://服务地址/v1" disabled={busy} /></label>
-      {wrongDeepSeek && <p className="api-address-hint">这是 DeepSeek 平台网站地址。API 地址请使用 https://api.deepseek.com；更换地址后请重新输入密钥。 <button type="button" onClick={() => changeBaseUrl('https://api.deepseek.com')} disabled={busy}>使用 API 地址</button></p>}
-      <label>模型名称<input aria-label="模型名称" value={model} onChange={e => setModel(e.target.value)} placeholder="输入服务支持的模型名称" disabled={busy} /></label>
-      <label>API 密钥<input aria-label="API 密钥" type="password" value={apiKey} onChange={e => { setApiKey(e.target.value); setKeyCleared(false); setModels([]); setModelsFor(''); }} autoComplete="new-password" placeholder={saved.configured ? '留空以保留已有密钥' : '输入密钥'} disabled={busy} /></label>{keyCleared && <p>服务地址已更改，已清空未保存的密钥，请重新输入。</p>}
-      <div className="api-model-picker"><button className="secondary" disabled={busy || !baseUrl.trim()} onClick={() => void fetchModels()}>获取模型列表</button>{modelsFor === baseUrl && models.length > 0 && <label>选择模型<select aria-label="选择模型" value={models.includes(model) ? model : ''} onChange={e => setModel(e.target.value)} disabled={busy}><option value="">请选择模型</option>{models.map(id => <option value={id} key={id}>{id}</option>)}</select></label>}</div><p>获取模型会连接上述地址并发送该服务的密钥，不发送文件内容；也可手动填写模型名称。</p>
-      <div className="api-budgets"><label>上下文窗口（token）<input aria-label="上下文窗口（token）" type="number" min="4096" max="1000000" value={contextWindow} onChange={e => setContextWindow(Number(e.target.value))} disabled={busy} /></label><label>最大输出（token）<input aria-label="最大输出（token）" type="number" min="64" max="32768" value={maxTokens} onChange={e => setMaxTokens(Number(e.target.value))} disabled={busy} /></label></div>
-      <p>请按所选模型的实际限制填写预算；服务可能对请求收费。</p><div className="api-actions"><button className="primary" onClick={() => void save()} disabled={busy}>保存设置</button><button className="secondary" onClick={() => void testConnection()} disabled={busy || changed}>测试连接</button>{testing && <button className="secondary" onClick={() => void window.clipnote.apiCancel()}>{listing ? '取消获取' : '取消测试'}</button>}</div>
-      {saved.configured && <p className="api-receiver">测试连接将向 <strong>{saved.baseUrl}</strong> 的 <strong>{saved.model}</strong> 发送一段固定的短文本及整理指令，等待模型生成结构化结果，可能产生费用。保存设置不会自动发送请求。</p>}
-      {notice && <div className={`notice ${notice.error ? 'error' : ''}`} role={notice.error ? 'alert' : 'status'}>{notice.text}</div>}
-    </div></main></div>;
+const emptyForm = {name:'API 服务',baseUrl:'',model:'',apiKey:'',contextWindow:104857,maxTokens:10480};
+const profileRef = ({id,revision}:ApiProfileView) => ({id,revision});
+
+export function ApiSettings({onBack,embedded=false}:{onBack():void;embedded?:boolean}) {
+  const [services,setServices]=useState<ApiProfilesView>({profiles:[]});
+  const [selected,setSelected]=useState<ApiProfileView>();
+  const [form,setForm]=useState(emptyForm);
+  const [busy,setBusy]=useState(true),[activity,setActivity]=useState<'test'|'models'>();
+  const [models,setModels]=useState<string[]>([]);
+  const [notice,setNotice]=useState<{text:string;error?:boolean}>();
+  const [deleting,setDeleting]=useState(false),[keyCleared,setKeyCleared]=useState(false);
+  const select=(profile?:ApiProfileView)=>{
+    setSelected(profile);
+    setForm(profile ? {...profile,apiKey:''} : emptyForm);
+    setModels([]);setNotice(undefined);setKeyCleared(false);setDeleting(false);
+  };
+  useEffect(()=>{
+    let alive=true;
+    void window.clipnote.apiProfiles().then(unwrap).then(value=>{
+      if(!alive)return;
+      setServices(value);select(value.profiles.find(profile=>profile.id===value.defaultId)??value.profiles[0]);
+    }).catch(error=>{if(alive)setNotice({text:error.message,error:true});})
+      .finally(()=>{if(alive)setBusy(false);});
+    return()=>{alive=false;};
+  },[]);
+  const run=async(work:()=>Promise<void>)=>{
+    if(busy)return;
+    setBusy(true);setNotice(undefined);
+    try{await work();}catch(error){setNotice({text:error instanceof Error?error.message:'API 操作未完成。',error:true});}
+    finally{setBusy(false);setActivity(undefined);}
+  };
+  const reload=async()=>{const value=unwrap(await window.clipnote.apiProfiles());setServices(value);return value;};
+  const changeBase=(baseUrl:string)=>{
+    if(form.apiKey)setKeyCleared(true);
+    setForm({...form,baseUrl,apiKey:''});setModels([]);
+  };
+  const changed=!selected || form.name!==selected.name || form.baseUrl.replace(/\/$/,'')!==selected.baseUrl ||
+    form.model!==selected.model || form.contextWindow!==selected.contextWindow || form.maxTokens!==selected.maxTokens || !!form.apiKey;
+  const save=()=>void run(async()=>{
+    const {name,baseUrl,model,apiKey,contextWindow,maxTokens}=form;
+    const input={name,baseUrl,model,apiKey,contextWindow,maxTokens};
+    const profile=unwrap(await window.clipnote.apiSaveProfile(selected ? {...input,...profileRef(selected)} : input));
+    await reload();select(profile);setNotice({text:'设置已安全保存'});
+  });
+  const fetchModels=()=>void run(async()=>{
+    setActivity('models');setModels([]);
+    const value=unwrap(await window.clipnote.apiModels({baseUrl:form.baseUrl,apiKey:form.apiKey,profile:selected?profileRef(selected):null}));
+    setModels(value);setNotice({text:value.length?'请选择模型，或手动填写模型名称。':'服务未返回模型，请手动填写。'});
+  });
+  const testConnection=()=>void run(async()=>{
+    if(!selected)return;
+    setActivity('test');unwrap(await window.clipnote.apiTest(profileRef(selected)));
+    setNotice({text:'连接测试通过'});
+  });
+  const setDefault=()=>void run(async()=>{
+    if(!selected)return;
+    unwrap(await window.clipnote.apiSetDefault(selected.id));await reload();setNotice({text:'已设为默认服务。'});
+  });
+  const remove=()=>void run(async()=>{
+    if(!selected)return;
+    unwrap(await window.clipnote.apiDeleteProfile(profileRef(selected)));
+    const value=await reload();select(value.profiles.find(profile=>profile.id===value.defaultId)??value.profiles[0]);
+    setNotice({text:'已删除 API 服务。'});
+  });
+  return <div className={embedded?'api-embedded':'api-shell'}>
+    {!embedded && <header className="toolbar"><h1>AI 服务</h1><button className="secondary" onClick={onBack}>返回文件工作台</button></header>}
+    <main className="api-panel">
+      <section className="api-profile-list" aria-label="API 服务列表">
+        <header><h2>API 服务</h2><button className="secondary" disabled={busy} onClick={()=>select()}>添加服务</button></header>
+        {services.profiles.map(profile=><button key={profile.id} className="api-profile-card" aria-pressed={profile.id===selected?.id} disabled={busy} onClick={()=>select(profile)}>
+          <strong>{profile.name}</strong>{profile.id===services.defaultId && <small>默认</small>}<span>{profile.model}</span>
+        </button>)}
+      </section>
+      <section className="api-form">
+        <h2>{selected?selected.name:'添加 API 服务'}</h2>
+        <label>服务名称<input value={form.name} maxLength={80} disabled={busy} onChange={e=>setForm({...form,name:e.target.value})}/></label>
+        <label>服务地址<input aria-label="服务地址" value={form.baseUrl} placeholder="https://服务地址/v1" disabled={busy} onChange={e=>changeBase(e.target.value)}/></label>
+        {/^https:\/\/platform\.deepseek\.com\/?$/i.test(form.baseUrl.trim()) && <button className="secondary" onClick={()=>changeBase('https://api.deepseek.com')}>使用 API 地址</button>}
+        <label>模型名称<input aria-label="模型名称" value={form.model} disabled={busy} onChange={e=>setForm({...form,model:e.target.value})}/></label>
+        <label>API 密钥<input aria-label="API 密钥" type="password" autoComplete="off" value={form.apiKey} placeholder={selected?'留空以保留已有密钥':'填写此服务的密钥'} disabled={busy} onChange={e=>{setForm({...form,apiKey:e.target.value});setKeyCleared(false);}}/></label>
+        {keyCleared && <p>服务地址已改变，请填写该地址的密钥。</p>}
+        <div className="api-model-picker"><button className="secondary" disabled={busy || !form.baseUrl.trim() || (!selected && !form.apiKey.trim())} onClick={fetchModels}>获取模型列表</button>
+          {models.length>0 && <label>选择模型<select aria-label="选择模型" value={models.includes(form.model)?form.model:''} disabled={busy} onChange={e=>setForm({...form,model:e.target.value})}><option value="">请选择模型</option>{models.map(value=><option key={value} value={value}>{value}</option>)}</select></label>}
+        </div>
+        <div className="api-budgets">
+          <label>上下文窗口（token）<input type="number" min={4096} max={1000000} value={form.contextWindow} disabled={busy} onChange={e=>setForm({...form,contextWindow:Number(e.target.value)})}/></label>
+          <label>最大输出（token）<input type="number" min={64} max={32768} value={form.maxTokens} disabled={busy} onChange={e=>setForm({...form,maxTokens:Number(e.target.value)})}/></label>
+        </div>
+        <div className="api-actions">
+          <button className="primary" onClick={save} disabled={busy}>保存设置</button>
+          <button className="secondary" onClick={testConnection} disabled={busy || changed}>测试连接</button>
+          {selected && selected.id!==services.defaultId && <button className="secondary" onClick={setDefault} disabled={busy}>设为默认</button>}
+          {selected && <button className="quiet" onClick={()=>setDeleting(true)} disabled={busy}>删除服务</button>}
+          {activity && <button className="secondary" onClick={()=>void window.clipnote.apiCancel()}>{activity==='models'?'取消获取':'取消测试'}</button>}
+        </div>
+        {selected && <p className="api-receiver">测试连接将向 <strong>{selected.baseUrl}</strong> 的 <strong>{selected.model}</strong> 发送固定短文本，可能产生费用。</p>}
+        {notice && <div className={`notice ${notice.error?'error':''}`} role={notice.error?'alert':'status'}>{notice.text}</div>}
+        {deleting && <div className="file-dialog-shade"><section className="file-dialog" role="dialog" aria-modal="true" aria-label="删除 API 服务">
+          <h3>删除「{selected?.name}」？</h3><footer><button className="secondary" onClick={()=>setDeleting(false)}>取消</button><button className="primary" disabled={busy} onClick={remove}>确认删除</button></footer>
+        </section></div>}
+      </section>
+    </main>
+  </div>;
 }

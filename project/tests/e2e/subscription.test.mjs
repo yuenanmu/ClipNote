@@ -41,11 +41,11 @@ test('subscription diagnostics follow the real desktop task through saving',{tim
  await panel.getByRole('button',{name:/检查资料|重试整理/}).click();await panel.getByRole('button',{name:'确认发送'}).click();
  await panel.getByRole('region',{name:'待保存结果'}).getByRole('button',{name:'恢复保存'}).waitFor();
  await panel.getByLabel('整理阶段').getByText(/等待确认保存/).waitFor();
- let data=await page.evaluate(()=>window.clipnote.organizationList());let item=data.value.find(record=>record.service==='subscription');assert.equal(item.status,'awaiting_save');
+ let data=await page.evaluate(()=>window.clipnote.organizationList());let item=data.value.find(record=>record.service==='subscription');assert.equal(item.status,'awaiting_save');assert.deepEqual(item.chunkProgress,{completed:1,total:1});
  for(const phase of ['request','headers','first_text','received','validating','staging','awaiting_save'])assert.ok(item.events.some(event=>event.phase===phase),phase);
  await panel.getByRole('region',{name:'待保存结果'}).getByRole('button',{name:'恢复保存'}).click();await page.getByRole('dialog',{name:'恢复保存结果'}).getByRole('button',{name:'确认保存结果'}).click();
  await page.getByText('结果已保存。').waitFor();data=await page.evaluate(()=>window.clipnote.organizationList());item=data.value.find(record=>record.id===item.id);assert.equal(item.status,'succeeded');assert.ok(item.events.some(event=>event.phase==='saved'));assert.doesNotMatch(JSON.stringify(item),/合成资料|合成要点|synthetic-restart-secret/);
- await panel.getByLabel('整理阶段').getByText(/已完成/).waitFor();
+ await panel.getByLabel('整理阶段').getByText('已完成',{exact:true}).waitFor();
  assert.equal(await panel.getByText('整理完成，请在待保存结果中确认保存。').count(),0);
  await app.evaluate(async({session})=>{const protocol=session.fromPartition('clipnote-subscription').protocol;protocol.unhandle('https');protocol.handle('https',async request=>{const url=new URL(request.url);if(url.hostname!=='api.openai.com')return new Response('',{status:403});if(url.pathname==='/v1/models')return Response.json({models:[{slug:'fixture',display_name:'Fixture',visibility:'list'}]});return Response.json({error:{message:'private remote error'}},{status:503});});});
  await panel.getByRole('button',{name:/检查资料|重试整理/}).click();await panel.getByRole('button',{name:'确认发送'}).click();

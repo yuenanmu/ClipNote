@@ -76,6 +76,15 @@ export function createOrganizationTasks(clock: () => number = () => performance.
       record.snapshot.chunk={index:value.chunkIndex,...(Number.isInteger(total) && total!>0 && value.chunkIndex<total! ? {total}: {})};
       record.snapshot.revision++;
     },
+    chunkProgress(id: string, value: NonNullable<Snapshot['chunkProgress']>): void {
+      const record = records.get(id);
+      const previous = record?.snapshot.chunkProgress;
+      if (!record || record.snapshot.status !== 'running' || !Number.isSafeInteger(value.total) ||
+          !Number.isSafeInteger(value.completed) || value.total < 1 || value.completed < 0 ||
+          value.completed > value.total || (previous && (previous.total !== value.total || previous.completed >= value.completed))) return;
+      record.snapshot.chunkProgress = { ...value };
+      record.snapshot.revision++;
+    },
     finish(id: string, status: Terminal, error?: string): void {
       const record = records.get(id);
       if (!record || record.snapshot.status !== 'running') return;

@@ -1,3 +1,6 @@
+import type { AnalysisChunkProgress } from '../contracts/analysis.ts';
+import type {ApiConfigInput, ApiProfileRef} from '../contracts/api.ts';
+import {isApiProfileRef} from '../modules/api/config.ts';
 import { basename } from 'node:path';
 import { isUuid } from '../modules/storage/io.ts';
 import { ApiError } from '../modules/api/errors.ts';
@@ -7,13 +10,14 @@ import type {BatchState,BatchItem,WorkspaceResult} from '../contracts/workspace.
 import type { AnalysisDiagnosticPhase } from '../contracts/analysis.ts';
 import { classifyDiagnosticError, type DiagnosticPhase } from './organization-tasks.ts';
 
-type Config = { baseUrl: string; model: string; instructions?: string };
+type Config = { profile?:ApiProfileRef; baseUrl: string; model: string; instructions?: string };
 interface Dependencies {
-  isTrustedSender(event: unknown): boolean; config(): Promise<{ baseUrl: string; model: string }>;
+  isTrustedSender(event: unknown): boolean; config(ref?:ApiProfileRef): Promise<{ baseUrl: string; model: string; profile?:ApiProfileRef; name?:string }>;
+  credentials?(ref?:ApiProfileRef):Promise<ApiConfigInput>;
   resetAnalysis?():void;
   preview(id: string, target: string): Promise<OutputPlan>;
-  analyze(id: string, config: Config, signal: AbortSignal, plan: OutputPlan, report:(progress:BatchItem['progress'],timing?:BatchItem['timing'])=>void, diagnostic?:(phase:AnalysisDiagnosticPhase,ageMs?:number)=>void): Promise<{ markdown: string;timing?:BatchItem['timing'];reused?:boolean }>;
-  diagnostic?(sourceId:string): { id?:string; event(phase:DiagnosticPhase,ageMs?:number):void; progress?(value:NonNullable<BatchItem['progress']>):void; finish(status:'succeeded'|'failed'|'cancelled',error?:string):void };
+  analyze(id: string, config: Config, signal: AbortSignal, plan: OutputPlan, report:(progress:BatchItem['progress'],timing?:BatchItem['timing'])=>void, diagnostic?:(phase:AnalysisDiagnosticPhase,ageMs?:number)=>void, chunkProgress?:(value:AnalysisChunkProgress)=>void, credentials?:ApiConfigInput): Promise<{ markdown: string;timing?:BatchItem['timing'];reused?:boolean }>;
+  diagnostic?(sourceId:string): { id?:string; event(phase:DiagnosticPhase,ageMs?:number):void; progress?(value:NonNullable<BatchItem['progress']>):void; chunkProgress?(value:AnalysisChunkProgress):void;finish(status:'succeeded'|'failed'|'cancelled',error?:string):void };
   save(id: string, target: string, plan: OutputPlan, markdown: string): Promise<void>;
   lock?(plans: OutputPlan[]):()=>void;
   stage?(plan:OutputPlan,markdown:string):Promise<string>;
@@ -26,7 +30,7 @@ export function createBatchHandlers(deps: Dependencies): Record<'state' | 'prepa
   const failure = (message: string):WorkspaceResult<BatchState> => ({ status: 'error', error: { code: 'BATCH_ERROR', message } });
   const snapshot = ():WorkspaceResult<BatchState> => ({ status: 'ok', value: structuredClone(state) });
   const safe = (error: unknown) => error instanceof ApiError || error instanceof AnalysisError ? error.message : error instanceof WorkspaceError && error.code === 'CONFLICT' ? '目标文件已存在、已更改或归属不明，请检查后重新确认。' : error instanceof WorkspaceError && ['MISSING','RELINK_REQUIRED','ASSOCIATION_LOST'].includes(error.code) ? '已关联的笔记已移动或关联登记未完成，请重新关联。' : '处理未完成，请检查文件及目录。';
-  const run = async (signal: AbortSignal) => {
+  const run = async (signal: AbortSignal, credentials?:ApiConfigInput) => {
     for (const item of state.items) {
       if (item.status !== 'queued') continue;
       if (signal.aborted) { item.status = 'cancelled'; continue; }
@@ -37,7 +41,7 @@ export function createBatchHandlers(deps: Dependencies): Record<'state' | 'prepa
       let saveStarted:number|undefined;
       let diagnosticError:string|undefined;
       try {
-        let markdown=pending.get(item.id);if(markdown===undefined){const result=await deps.analyze(item.id,config!,signal,plans.get(item.id)!,(progress,timing)=>{if(item.status==='running'){if(progress){item.progress=progress;if(progress.phase!=='saving')diagnostic?.progress?.(progress);}if(timing)item.timing=timing;}},(phase,ageMs)=>diagnostic?.event(phase,ageMs));markdown=result.markdown;item.timing=result.timing;item.reused=result.reused;}
+        let markdown=pending.get(item.id);if(markdown===undefined){const result=await deps.analyze(item.id,config!,signal,plans.get(item.id)!,(progress,timing)=>{if(item.status==='running'){if(progress){item.progress=progress;if(progress.phase!=='saving')diagnostic?.progress?.(progress);}if(timing)item.timing=timing;}},(phase,ageMs)=>diagnostic?.event(phase,ageMs),value=>diagnostic?.chunkProgress?.(value),credentials);markdown=result.markdown;item.timing=result.timing;item.reused=result.reused;}
         if (signal.aborted) { item.status = 'cancelled'; continue; }
         pending.set(item.id, markdown);
         saveStarted=performance.now();diagnostic?.event('saving');item.progress={phase:'saving',requests:item.timing?.requests??0,chunkIndex:0};
@@ -50,6 +54,13 @@ export function createBatchHandlers(deps: Dependencies): Record<'state' | 'prepa
     }
     release?.();release=undefined;state.status = signal.aborted ? 'cancelled' : 'done'; abort = undefined;
   };
+  const configChanged = '服务配置已改变，请重新确认。';
+  const getRunCredentials = async () => {
+    const expected = config!;
+    const current = await deps.config(expected.profile);
+    if (current.baseUrl!==expected.baseUrl || current.model!==expected.model) throw new ApiError('INVALID_CONFIG');
+    return deps.credentials?.(expected.profile);
+  };
   const handle = (action: 'state' | 'prepare' | 'start' | 'cancel' | 'retry' | 'saved') => async (event: unknown, ...args: unknown[]) => {
     if (!deps.isTrustedSender(event)) return failure('无法执行批量整理。');
     if(action==='saved'){if(args.length!==2 || !isUuid(args[0]) || typeof args[1]!=='string')return failure('保存状态无效。');for(const item of state.items)if(drafts.get(item.id)===args[0]){drafts.delete(item.id);pending.delete(item.id);item.status='succeeded';item.outputPath=args[1];item.error=undefined;item.canRetrySave=false;item.diagnosticId=undefined;}return snapshot();}
@@ -58,27 +69,37 @@ export function createBatchHandlers(deps: Dependencies): Record<'state' | 'prepa
     if (state.status === 'running' || preparing) return failure('已有批量任务正在进行。');
     if (action === 'prepare') {
       const [ids, folder, selected] = args as [unknown, unknown, any];
-      if (args.length !== 3 || !Array.isArray(ids) || !ids.length || ids.length > 100 || ids.some(id => !isUuid(id)) || new Set(ids).size !== ids.length || !isUuid(folder) || !selected || Object.keys(selected).sort().join(',') !== 'baseUrl,instructions,model' || typeof selected.baseUrl !== 'string' || typeof selected.model !== 'string' || typeof selected.instructions !== 'string' || selected.instructions.length > 1000 || /[\x00-\x08\x0b\x0c\x0e-\x1f]/.test(selected.instructions)) return failure('批量选择或整理要求无效。');
+      if (args.length !== 3 || !Array.isArray(ids) || !ids.length || ids.length > 100 || ids.some(id => !isUuid(id)) || new Set(ids).size !== ids.length || !isUuid(folder) || !selected || !['baseUrl,instructions,model','baseUrl,instructions,model,profile'].includes(Object.keys(selected).sort().join(',')) || ('profile' in selected && !isApiProfileRef(selected.profile)) || typeof selected.baseUrl !== 'string' || typeof selected.model !== 'string' || typeof selected.instructions !== 'string' || selected.instructions.length > 1000 || /[\x00-\x08\x0b\x0c\x0e-\x1f]/.test(selected.instructions)) return failure('批量选择或整理要求无效。');
       preparing = true;
       try {
-        const current = await deps.config(); if (current.baseUrl !== selected.baseUrl || current.model !== selected.model) return failure('服务配置已改变，请重新确认。');
+        const current = await deps.config(selected.profile); if (current.baseUrl !== selected.baseUrl || current.model !== selected.model) return failure('服务配置已改变，请重新确认。');
         const next = new Map<string, OutputPlan>(), names = new Set<string>();
         for (const id of ids) { const plan = await deps.preview(id, folder); const key = plan.notePath.toLowerCase(); if (names.has(key)) return failure('所选资料存在同名输出，请先重命名。'); names.add(key); next.set(id, plan); }
-        target = folder; config = { baseUrl: selected.baseUrl, model: selected.model, instructions: selected.instructions }; plans = next; pending = new Map();
-        deps.resetAnalysis?.();drafts.clear();state = { status: 'ready', baseUrl: config.baseUrl, model: config.model, items: ids.map(id => ({ id, name: basename(next.get(id)!.sourcePath), outputName: next.get(id)!.name, outputPath:next.get(id)!.notePath, overwrite: next.get(id)!.exists, status: 'queued' })) }; return snapshot();
+        target = folder; config = { profile:current.profile, baseUrl: selected.baseUrl, model: selected.model, instructions: selected.instructions }; plans = next; pending = new Map();
+        deps.resetAnalysis?.();drafts.clear();state = { status: 'ready', serviceName:current.name, baseUrl: config.baseUrl, model: config.model, items: ids.map(id => ({ id, name: basename(next.get(id)!.sourcePath), outputName: next.get(id)!.name, outputPath:next.get(id)!.notePath, overwrite: next.get(id)!.exists, status: 'queued' })) }; return snapshot();
       } catch (error) { return failure(safe(error)); } finally { preparing = false; }
     }
     if (action === 'start') {
       if (args.length || state.status !== 'ready' || !config) return failure('请先准备并确认批量任务。');
-      preparing = true; try { const current = await deps.config(); if (current.baseUrl !== config.baseUrl || current.model !== config.model) return failure('服务配置已改变，请重新确认。');
+      preparing = true; try {
+        let credentials:ApiConfigInput|undefined;
+        try { credentials=await getRunCredentials(); } catch (error) {
+          return failure(error instanceof ApiError && error.code==='INVALID_CONFIG' ? configChanged : safe(error));
+        }
         for (const item of state.items) { const expected = plans.get(item.id)!, actual = await deps.preview(item.id, target); if (actual.sourcePath !== expected.sourcePath || actual.notePath !== expected.notePath || actual.exists !== expected.exists || actual.checksum !== expected.checksum || actual.sourceChecksum!==expected.sourceChecksum) return failure('文件或目标已更改，请重新检查并确认。'); }
-        release=deps.lock?.([...plans.values()]);abort = new AbortController(); state.status = 'running'; void run(abort.signal); return snapshot();
+        release=deps.lock?.([...plans.values()]);abort = new AbortController(); state.status = 'running'; void run(abort.signal,credentials); return snapshot();
       } catch (error) { return failure(safe(error)); } finally { preparing = false; }
     }
     if (action === 'retry') {
       const ids = args[0]; if (args.length !== 1 || !Array.isArray(ids) || !ids.length || ids.some(id => !state.items.some(item => item.id === id && item.status === 'failed'))) return failure('请选择失败项目。');
-      preparing = true; try { if(ids.some(id=>!pending.has(id))){ const current = await deps.config(); if (!config || current.baseUrl !== config.baseUrl || current.model !== config.model) return failure('服务配置已改变，请重新确认。'); }
-        release=deps.lock?.(ids.map(id=>plans.get(id)!));for (const item of state.items) if (ids.includes(item.id)) item.status = 'queued'; abort = new AbortController(); state.status = 'running'; void run(abort.signal); return snapshot();
+      preparing = true; try {
+        let credentials:ApiConfigInput|undefined;
+        if (ids.some(id=>!pending.has(id))) {
+          try { credentials=await getRunCredentials(); } catch(error) {
+            return failure(error instanceof ApiError && error.code==='INVALID_CONFIG' ? configChanged : safe(error));
+          }
+        }
+        release=deps.lock?.(ids.map(id=>plans.get(id)!));for (const item of state.items) if (ids.includes(item.id)) item.status = 'queued'; abort = new AbortController(); state.status = 'running'; void run(abort.signal,credentials); return snapshot();
       } catch { return failure('无法读取服务配置。'); } finally { preparing = false; }
     }
     return failure('无法执行批量整理。');

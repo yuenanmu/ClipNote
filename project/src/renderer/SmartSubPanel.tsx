@@ -36,7 +36,7 @@ export function SmartSubPanel({onBack,onSource,onSettings,active}:{onBack():void
   const refreshTranscription=refreshTask;
   const cancelTranscription=()=>void execute(async()=>setTranscriptionTask(unwrap(await window.clipnote.smartsubTranscriptionCancel(id))));
   const importTranscription=(index:number)=>void execute(async()=>onSource(unwrap(await window.clipnote.smartsubTranscriptionImport(id,index))));
-  const forget=()=>{observer.current?.();try{localStorage.removeItem('clipnote.smartsub.task');localStorage.removeItem('clipnote.smartsub.transcribing');}catch{}setId('');setTask(undefined);setTranscription(undefined);setTranscriptionTask(undefined);setTranscriptionStarted(false);setForgetting(false);setError('');setObservationError('');};
+  const forget=()=>void execute(async()=>{unwrap(await window.clipnote.smartsubTrackLegacy(id,'forget'));observer.current?.();try{localStorage.removeItem('clipnote.smartsub.task');localStorage.removeItem('clipnote.smartsub.transcribing');}catch{}setId('');setTask(undefined);setTranscription(undefined);setTranscriptionTask(undefined);setTranscriptionStarted(false);setForgetting(false);setError('');setObservationError('');});
   const labels:Record<string,string>={queued:'等待中',running:'正在获取字幕',paused:'已暂停',review:'等待处理',cancelling:'正在取消',completed:'获取完成',failed:'失败',cancelled:'已取消',interrupted:'已中断'};
   const terminal=(value:SmartSubTaskView|undefined)=>Boolean(value && ['completed','failed','cancelled','interrupted'].includes(value.status));
   const transcribing=transcriptionStarted && !terminal(transcriptionTask);
