@@ -1,7 +1,7 @@
 import {electronTestTarget} from './electron-target.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {mkdirSync,mkdtempSync,writeFileSync,copyFileSync,rmSync,readFileSync} from 'node:fs';
+import {mkdirSync,mkdtempSync,writeFileSync,copyFileSync,rmSync,readFileSync,readdirSync} from 'node:fs';
 import {join,dirname,resolve} from 'node:path';
 import {_electron as electron} from 'playwright';
 
@@ -80,5 +80,17 @@ test('video queue keeps running across pages and copies an original subtitle wit
   assert.doesNotMatch(readFileSync(join(profile,'smartsub','video-queue.json'),'utf8'),/https:\/\/example\.invalid/);
   writeFileSync(join(dirname(cli),'release'),'yes');
   await nav.click();
-  await page.getByRole('listitem').filter({hasText:'https://example.invalid/first'}).getByRole('button',{name:'打开原文'}).waitFor();
+  const first=page.getByRole('listitem').filter({hasText:'https://example.invalid/first'});
+  await first.getByRole('button',{name:'打开原文'}).waitFor();
+  const output=readdirSync(dirname(cli)).find(name=>name.startsWith('t-')&&name.endsWith('.json'));
+  assert.ok(output);
+  const original=JSON.parse(readFileSync(join(dirname(cli),output),'utf8')).file;
+  writeFileSync(original,'');
+  await first.getByRole('button',{name:'预览字幕'}).click();
+  await first.getByText('SmartSub 已完成，但生成的字幕为空。可以重试转写。',{exact:true}).waitFor();
+  await first.getByRole('button',{name:'打开原文'}).waitFor({state:'hidden'});
+  await first.getByRole('button',{name:'重试',exact:true}).click();
+  await first.getByRole('button',{name:'打开原文'}).waitFor();
+  assert.equal(readdirSync(dirname(cli)).filter(name=>name.startsWith('t-')&&name.endsWith('.json')).length,2);
+  assert.equal(readFileSync(original,'utf8'),'');
 });

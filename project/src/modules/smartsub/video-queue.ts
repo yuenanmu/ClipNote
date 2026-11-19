@@ -2,7 +2,7 @@ import {randomUUID} from 'node:crypto';
 import {exists,isUuid,readJson,writeAtomic} from '../storage/io.ts';
 import {TranscriptionResourceError} from './transcription-tasks.ts';
 import {makeDownloadRequest} from './requests.ts';
-import type {SmartSubTaskView,SmartSubTranscriptionReadiness,SmartSubSelection,VideoQueueView,VideoStage} from '../../contracts/smartsub.ts';
+import {transcriptionOutputMessages,type TranscriptionOutputIssue,type SmartSubTaskView,type SmartSubTranscriptionReadiness,type SmartSubSelection,type VideoQueueView,type VideoStage} from '../../contracts/smartsub.ts';
 
 type Lane='download'|'transcription';
 type Active='downloading'|'transcribing';
@@ -197,6 +197,11 @@ export class VideoQueue {
     if(row?.stage!=='ready'||!row.lane||!Number.isSafeInteger(index)||index<0||index>=(row.subtitleCount??0)) throw new Error('字幕尚不可用。');
     return {lane:row.lane, requestId:row.requestId};
   }
+  async noteUnavailableTranscription(id:string,requestId:string,issue:TranscriptionOutputIssue) {
+    await this.patch(id,item=>item.stage==='ready' && item.requestId===requestId && item.lane==='transcription'
+      ? {...item,stage:'failed',subtitleCount:0,message:transcriptionOutputMessages[issue]}
+      : item);
+  }
   async tick() { await this.initial; await Promise.all([this.step('download'),this.step('transcription')]); }
   private async step(lane:Lane) {
     if(this.stopped || this.running.has(lane)) return;
@@ -284,6 +289,8 @@ export class VideoQueue {
         return item.confirmed && item.remoteCancelling===remoteCancelling && item.message===message
           ? item : {...item,confirmed:true,remoteCancelling,message};
       }
+      if(lane==='transcription' && value.transcriptionOutputIssue)
+        return {...item,stage:'failed',subtitleCount:0,cancelRequested:false,message:transcriptionOutputMessages[value.transcriptionOutputIssue]};
       if(value.subtitleCount>0) return {...item,stage:'ready',subtitleCount:value.subtitleCount,cancelRequested:false};
       if(item.cancelRequested) return {...item,stage:'cancelled',cancelRequested:false};
       if(lane==='download' && !value.hasSubtitles) return item.autoTranscribe

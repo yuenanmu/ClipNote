@@ -1,15 +1,53 @@
 import {randomUUID} from 'node:crypto';
 import {lstat} from 'node:fs/promises';
 import {dirname,join,resolve} from 'node:path';
-import {checkedDirectory,digest,exists,isUuid,readJson,writeAtomic} from '../storage/io.ts';
+import {checkedDirectory,digest,exists,isUuid,readBytes,readJson,writeAtomic} from '../storage/io.ts';
 import {inspectTranscription,type TranscriptionSelection} from './transcription.ts';
 import {makeTaskRequest,makeSubtitleReadRequest} from './requests.ts';
 import {parseTaskReceipt,type SmartSubTaskStatus} from './receipts.ts';
 import {loadSmartSubSubtitle} from './subtitles.ts';
+import {decodeSourceBytes,MAX_FILE_BYTES} from '../source/parser.ts';
+import {SourceImportError} from '../source/errors.ts';
+import {transcriptionOutputMessages,type TranscriptionOutputIssue,type SmartSubTaskView} from '../../contracts/smartsub.ts';
 
 type Invoke=(operation:string,input:unknown)=>Promise<unknown>;
 type Receipt=ReturnType<typeof parseTaskReceipt>;
 export class TranscriptionResourceError extends Error {}
+
+export class TranscriptionOutputError extends Error {
+  readonly issue:TranscriptionOutputIssue;
+  readonly allUnavailable:boolean;
+
+  constructor(issue:TranscriptionOutputIssue,allUnavailable:boolean) {
+    super(allUnavailable ? transcriptionOutputMessages[issue]
+      : issue==='empty' ? '这份字幕为空，请选择同一任务的其他字幕。'
+      : '这份字幕文件找不到，请选择同一任务的其他字幕。');
+    this.issue=issue;
+    this.allUnavailable=allUnavailable;
+  }
+}
+
+const missingFile=(error:unknown)=>(error as NodeJS.ErrnoException | undefined)?.code==='ENOENT';
+
+async function checkTranscriptionOutputs(paths:string[]):Promise<TranscriptionOutputIssue|undefined> {
+  if(!paths.length)return;
+  let hasEmptyFile=false;
+  for(const path of paths) {
+    try {
+      await checkedDirectory(dirname(path));
+      const file=await lstat(path);
+      if(!file.isFile() || file.isSymbolicLink())continue;
+      if(file.size>MAX_FILE_BYTES)return; // Reading it later will report the size limit.
+      if(file.size && decodeSourceBytes(await readBytes(path,MAX_FILE_BYTES)).rawText.trim())return;
+      hasEmptyFile=true;
+    } catch(error) {
+      if(missingFile(error) || (error as NodeJS.ErrnoException | undefined)?.code==='UNSAFE_PATH')continue;
+      // Preserve the dedicated format or permission error from the normal reader.
+      return;
+    }
+  }
+  return hasEmptyFile?'empty':'missing';
+}
 type RecordData={version:1;requestId:string;fingerprint:string;taskId?:string;status:'prepared'|SmartSubTaskStatus};
 export class TranscriptionTasks {
   private root:string;private invoke:Invoke;private source:(id:string)=>Promise<Receipt>;private cache:(id:string)=>string;
@@ -36,7 +74,7 @@ export class TranscriptionTasks {
     }
     const source=await this.source(id);if(source.status!=='completed' || source.hasSubtitles || source.mediaPaths.length!==1)throw new Error('原视频任务状态已变化。');
     if (attemptId && !retry && existing && existing.requestId!==attemptId) throw new Error('已有其他转写尝试，请先恢复。');
-    if(retry && (!attemptId || existing?.requestId!==attemptId)){if(!existing?.taskId)throw new Error('原转写尚未确认提交，请先恢复。');const current=await this.query(id,existing,'tasks.get');if(!['failed','cancelled','interrupted'].includes(current.status) && !(attemptId && current.status==='completed' && current.subtitleCount===0))throw new Error('原转写尚未失败、取消或中断，不能重试。');await writeAtomic(join(this.root,'transcriptions','history',existing.requestId+'.json'),existing);existing=undefined;}
+    if(retry && (!attemptId || existing?.requestId!==attemptId)){if(!existing?.taskId)throw new Error('原转写尚未确认提交，请先恢复。');const current=await this.query(id,existing,'tasks.get');if(!['failed','cancelled','interrupted'].includes(current.status) && !(current.status==='completed' && (current.transcriptionOutputIssue || attemptId && current.subtitleCount===0)))throw new Error('原转写尚未失败、取消或中断，不能重试。');await writeAtomic(join(this.root,'transcriptions','history',existing.requestId+'.json'),existing);existing=undefined;}
     const requestId=existing?.requestId??attemptId??randomUUID();
     const input={files:[source.mediaPaths[0]],engine,model,outputDir:join(this.cache(id),'transcript',requestId),requestId};
     const fingerprint=digest(JSON.stringify(input));if(existing && existing.fingerprint!==fingerprint)throw new Error('转写配置已变化，不能复用原任务。');
@@ -45,7 +83,11 @@ export class TranscriptionTasks {
     const raw=await this.call(id,'transcribe',input);if(!raw || typeof raw!=='object' || Array.isArray(raw))throw new Error('转写回执无效。');
     const taskId=(raw as any).id;makeTaskRequest(taskId);const receipt=parseTaskReceipt(raw,taskId,this.cache(id),true);record.taskId=taskId;record.status=receipt.status;await writeAtomic(path,record);return this.view(id,receipt);
   }
-  private view(id:string,receipt:Receipt){return {requestId:id,status:receipt.status,subtitleCount:receipt.subtitlePaths.length,hasSubtitles:receipt.hasSubtitles};}
+  private async view(id:string,receipt:Receipt):Promise<SmartSubTaskView> {
+    const issue=receipt.status==='completed' ? await checkTranscriptionOutputs(receipt.subtitlePaths) : undefined;
+    return {requestId:id,status:receipt.status,subtitleCount:issue?0:receipt.subtitlePaths.length,
+      hasSubtitles:receipt.hasSubtitles,...(issue?{transcriptionOutputIssue:issue}:{})};
+  }
   private async query(id:string,record:RecordData,op:'tasks.get'|'tasks.cancel'){
     if(!record.taskId)throw new Error('转写尚未提交，请重新确认资源后恢复。');
     const receipt=parseTaskReceipt(await this.call(id,op,makeTaskRequest(record.taskId)),record.taskId,this.cache(id),true);
@@ -64,5 +106,20 @@ export class TranscriptionTasks {
     return this.query(id,record,'tasks.get');
   }
   async cancel(id:string){return this.query(id,await this.record(id),'tasks.cancel');}
-  async subtitle(id:string,index:number){if(!Number.isSafeInteger(index) || index<0 || index>999)throw new Error('字幕选择无效。');const record=await this.record(id);if(!record.taskId)throw new Error('转写尚未完成。');const receipt=parseTaskReceipt(await this.call(id,'tasks.get',makeTaskRequest(record.taskId)),record.taskId,this.cache(id),true);if(receipt.status!=='completed' || !receipt.subtitlePaths[index])throw new Error('字幕尚不可用。');const path=receipt.subtitlePaths[index];return loadSmartSubSubtitle(this.cache(id),path,(offset,limit)=>this.call(id,'subtitles.read',makeSubtitleReadRequest(path,offset,limit)));}
+  async subtitle(id:string,index:number) {
+    if(!Number.isSafeInteger(index) || index<0 || index>999)throw new Error('字幕选择无效。');
+    const record=await this.record(id);
+    if(!record.taskId)throw new Error('转写尚未完成。');
+    const receipt=parseTaskReceipt(await this.call(id,'tasks.get',makeTaskRequest(record.taskId)),record.taskId,this.cache(id),true);
+    const path=receipt.subtitlePaths[index];
+    if(receipt.status!=='completed' || !path)throw new Error('字幕尚不可用。');
+    try {
+      return await loadSmartSubSubtitle(this.cache(id),path,(offset,limit)=>this.call(id,'subtitles.read',makeSubtitleReadRequest(path,offset,limit)));
+    } catch(error) {
+      const empty=error instanceof SourceImportError && error.code==='EMPTY_FILE';
+      if(!empty && !missingFile(error))throw error;
+      const issue=await checkTranscriptionOutputs(receipt.subtitlePaths);
+      throw new TranscriptionOutputError(issue??(empty?'empty':'missing'),!!issue);
+    }
+  }
 }

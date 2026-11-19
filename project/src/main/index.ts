@@ -27,7 +27,7 @@ import { SmartSubTasks } from '../modules/smartsub/tasks.ts';
 import { inspectSmartSub } from '../modules/smartsub/readiness.ts';
 import {SmartSubPreferences} from '../modules/smartsub/preferences.ts';
 import {createSmartSubPreferencesHandlers} from './smartsub-preferences-controller.ts';
-import { TranscriptionTasks } from '../modules/smartsub/transcription-tasks.ts';
+import { TranscriptionOutputError, TranscriptionTasks } from '../modules/smartsub/transcription-tasks.ts';
 import { BatchReuse } from '../modules/api/batch-reuse.ts';
 import { WorkspaceFiles } from '../modules/workspace/files.ts';
 import { WorkspaceError } from '../modules/workspace/files.ts';
@@ -39,6 +39,7 @@ import { ApiConfigStore, normalizeBaseUrl } from '../modules/api/config.ts';
 import { listModels, resolveModelKey } from '../modules/api/models.ts';
 import { createApiAdapter } from '../modules/api/provider.ts';
 import { ApiError } from '../modules/api/errors.ts';
+import { SourceImportError } from '../modules/source/errors.ts';
 import { parseSource } from '../modules/source/parser.ts';
 import { planAnalysis } from '../modules/analysis/plan.ts';
 import { validateOutline } from '../modules/analysis/validate.ts';
@@ -240,7 +241,9 @@ app.whenReady().then(() => {
   const videoResult=async<T>(event:unknown,work:()=>Promise<T>)=>{
     if(!trusted(event as IpcMainInvokeEvent)) return {status:'error',error:{code:'VIDEO_QUEUE',message:'视频队列请求无效。'}};
     try {return {status:'ok',value:await work()};}
-    catch(error) {return {status:'error',error:{code:'VIDEO_QUEUE',message:error instanceof Error && !('code' in error) && error.message.length<=240 ? error.message : '视频队列操作未完成，请检查连接。'}};}
+    catch(error) {
+      if(error instanceof SourceImportError) return {status:'error',error:{code:error.code,message:error.message}};
+      return {status:'error',error:{code:'VIDEO_QUEUE',message:error instanceof Error && !('code' in error) && error.message.length<=240 ? error.message : '视频队列操作未完成，请检查连接。'}};}
   };
   ipcMain.handle('smartsub-task:legacy-tracking',(event,...args)=>videoResult(event,()=>withVideoMode(async()=>{
     const [id,mode]=args;
@@ -280,7 +283,13 @@ app.whenReady().then(() => {
     const [id,index]=args;
     if(args.length!==2 || !isUuid(id) || typeof index!=='number') throw new Error('字幕选择无效。');
     const row=await videoQueue.subtitle(id,index);
-    return row.lane==='download'?smartsubTasks.subtitle(row.requestId,index):transcriptions.subtitle(row.requestId,index);
+    if(row.lane==='download')return smartsubTasks.subtitle(row.requestId,index);
+    try {return await transcriptions.subtitle(row.requestId,index);}
+    catch(error) {
+      if(error instanceof TranscriptionOutputError && error.allUnavailable)
+        await videoQueue.noteUnavailableTranscription(id,row.requestId,error.issue);
+      throw error;
+    }
   };
   ipcMain.handle('video-queue:preview',(event,...args)=>videoResult(event,async()=>{
     const {document}=await videoSubtitle(args);

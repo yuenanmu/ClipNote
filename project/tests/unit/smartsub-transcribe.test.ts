@@ -2,10 +2,11 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {inspectTranscription} from '../../src/modules/smartsub/transcription.ts';
 import {TranscriptionTasks} from '../../src/modules/smartsub/transcription-tasks.ts';
-import {mkdtemp,rm,writeFile} from 'node:fs/promises';
+import {mkdir,mkdtemp,rm,writeFile} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {randomUUID} from 'node:crypto';
+import {fileURLToPath} from 'node:url';
 
 test('checks configured local engine and model before transcribing',async()=>{
   const calls:string[]=[];const result=await inspectTranscription(async op=>{calls.push(op);if(op==='settings.get')return {defaults:{transcriptionEngine:'builtin',model:'small'}};if(op==='engines.list')return {builtin:{state:'ready'}};return {modelsInstalled:['small']};});
@@ -71,4 +72,34 @@ test('completed transcription recovers task-owned TXT despite external intermedi
   assert.equal(result.status,'completed');assert.equal(result.subtitleCount,1);
   const snapshot=await resumed.subtitle(parent,0);assert.equal(snapshot.document.format,'txt');assert.equal(snapshot.bytes.toString(),'合成转写结果。');assert.equal(submissions,1);
   externalOnly=true;assert.equal((await resumed.refresh(parent)).subtitleCount,0);await assert.rejects(resumed.subtitle(parent,0),/字幕尚不可用/);
+});
+
+test('a completed job with only empty exports is unusable and retry keeps the downloaded media',async t=>{
+  const base=fileURLToPath(new URL('../../../.local/test-artifacts/',import.meta.url));
+  await mkdir(base,{recursive:true});
+  const root=await mkdtemp(join(base,'clipnote-empty-export-'));t.after(()=>rm(root,{recursive:true,force:true}));
+  const parent=randomUUID(),video=join(root,'sample.mp4'),txt=join(root,'result.txt'),srt=join(root,'result.srt');
+  await writeFile(video,'synthetic audio');await writeFile(txt,'');await writeFile(srt,'');
+  const ids:string[]=[];
+  const invoke=async(op:string,input:any):Promise<any>=>{
+    if(op==='settings.get')return {defaults:{transcriptionEngine:'builtin',model:'small'}};
+    if(op==='engines.list')return {builtin:{state:'ready'}};
+    if(op==='models.list')return {modelsInstalled:['small']};
+    if(op==='transcribe'){assert.deepEqual(input.files,[video]);ids.push(input.requestId);return {id:'job-'+ids.length,status:'running'};}
+    if(op==='tasks.get') return {id:input.id,status:'completed',artifacts:[{kind:'txt',path:txt},{kind:'srt',path:srt}]};
+    throw Error('unexpected');
+  };
+  const tasks=new TranscriptionTasks(root,invoke,async()=>({id:'download',status:'completed',subtitlePaths:[],mediaPaths:[video],hasSubtitles:false}));
+  await tasks.submit(parent,'builtin','small',randomUUID());
+  assert.equal((await tasks.refresh(parent)).transcriptionOutputIssue,'empty');
+  assert.equal((await tasks.refresh(parent)).subtitleCount,0);
+  await assert.rejects(tasks.subtitle(parent,0),{issue:'empty',allUnavailable:true});
+  await writeFile(txt,' \r\n');
+  assert.equal((await tasks.refresh(parent)).transcriptionOutputIssue,'empty');
+  await tasks.retry(parent,'builtin','small',randomUUID());
+  assert.equal(ids.length,2);assert.notEqual(ids[0],ids[1]);
+  await writeFile(txt,'有效字幕');
+  assert.equal((await tasks.refresh(parent)).transcriptionOutputIssue,undefined);
+  assert.equal((await tasks.subtitle(parent,0)).document.rawText,'有效字幕');
+  await assert.rejects(tasks.subtitle(parent,1),{issue:'empty',allUnavailable:false});
 });
