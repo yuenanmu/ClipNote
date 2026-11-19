@@ -360,3 +360,99 @@ svg { flex-shrink: 0; }
 }
 .file-shell progress[value]::-webkit-progress-bar { background:#dce9f1; border-radius:20px; }
 .file-shell progress[value]::-webkit-progress-value { background:#226e83; border-radius:20px; }
+
+
+/* Notes workbench. Keep the reader grid and zoom viewport geometry. */
+.file-shell .notes-main {
+  --notes-radius: 16px;
+  --notes-glass: rgba(248, 252, 255, .62);
+  --notes-line: rgba(82, 124, 150, .23);
+  background:
+    radial-gradient(ellipse at 95% 10%, #bce9de 0%, transparent 59%),
+    linear-gradient(141deg, #d2dff4, #e3f0f5 62%, #d6ebee);
+}
+
+.file-shell .notes-main .reader-shell,
+.file-shell .notes-main .reader-main,
+.file-shell .notes-main .note-editor-pane { background: transparent; }
+
+.file-shell .notes-main .reader-toolbar,
+.file-shell .notes-main .reader-view-switch,
+.file-shell .notes-main .reader-footer,
+.file-shell .notes-main .note-editor-pane > footer,
+.file-shell .notes-main .notes-welcome > .toolbar {
+  background: var(--notes-glass);
+  border-color: var(--notes-line);
+}
+
+.file-shell .notes-main .reader-toolbar,
+.file-shell .notes-main .notes-welcome > .toolbar { border-radius: var(--notes-radius) var(--notes-radius) 0 0; }
+.file-shell .notes-main .reader-view-switch { border-radius: 0 0 var(--notes-radius) var(--notes-radius); }
+.file-shell .notes-main .reader-view-switch button { color: #36566d; border-radius: 9px; }
+.file-shell .notes-main .reader-view-switch button:hover { background: rgba(163, 198, 230, .25); }
+.file-shell .notes-main .reader-view-switch button[aria-pressed="true"] {
+  background: linear-gradient(135deg, rgba(169, 199, 239, .62), rgba(149, 216, 198, .56));
+  color: #184c5f;
+}
+
+.file-shell .notes-main .reader-outline {
+  background: rgba(246, 252, 255, .63);
+  border-radius: var(--notes-radius);
+  box-shadow: inset 0 0 0 1px var(--notes-line);
+}
+
+.file-shell .notes-main .reader-outline li > ul { border-left-color: #91aebd; }
+.file-shell .notes-main .reader-outline .outline-row:hover { background: rgba(163, 198, 230, .25); }
+.file-shell .notes-main .reader-outline .outline-row.active { background: rgba(133, 201, 185, .43); }
+.file-shell .notes-main .reader-outline .outline-toggle { color: #35707e !important; }
+.file-shell .notes-main .outline-empty { color: var(--muted); }
+.file-shell .notes-main .outline-divider,
+.file-shell .notes-main .reader-divider { background: rgba(110, 156, 181, .16); }
+.file-shell .notes-main .outline-divider:hover,
+.file-shell .notes-main .outline-divider:focus-visible { background: #4c9ba9; }
+
+.file-shell .notes-main .reader-scroll,
+.file-shell .notes-main .note-editor-text {
+  background: rgba(253, 255, 255, .88);
+  border-radius: var(--notes-radius);
+  box-shadow: inset 0 0 0 1px var(--notes-line);
+}
+
+.file-shell .notes-main .mindmap-stage {
+  background:
+    radial-gradient(ellipse at 95% 4%, rgba(66, 154, 149, .36), transparent 62%),
+    linear-gradient(145deg, #263f64 0%, #182b47 44%, #17464b 100%);
+  border-radius: var(--notes-radius);
+  overflow: visible;
+}
+
+.file-shell .notes-main .mindmap-controls {
+  background: rgba(83, 122, 153, .36);
+  border-color: rgba(219, 240, 251, .29);
+  border-radius: 13px;
+}
+
+.file-shell .notes-main .mindmap-controls button { color: #eef6fb; border-radius: 7px; }
+.file-shell .notes-main .mindmap-controls button:hover:not(:disabled) { background: rgba(194, 226, 245, .20); }
+.file-shell .notes-main .mindmap-controls button:focus-visible,
+.file-shell .notes-main .mindmap-stage .markmap-label:focus-visible { outline-color: #a6e7e0; }
+.file-shell .notes-main .mindmap-controls span,
+.file-shell .notes-main .mindmap-hint { color: #c5dbe8; }
+.file-shell .notes-main .mindmap-canvas.markmap {
+  --markmap-circle-open-bg: #213653;
+  --markmap-highlight-node-bg: rgba(157, 235, 219, .23);
+}
+
+.file-shell .notes-main .reader-footer,
+.file-shell .notes-main .note-editor-pane > footer {
+  border-radius: 11px;
+  color: var(--muted);
+}
+
+.file-shell .notes-main .notes-welcome > div {
+  max-width: 100%;
+  background: var(--notes-glass);
+  border-radius: var(--notes-radius);
+  box-shadow: inset 0 0 0 1px var(--notes-line), var(--lift);
+  color: var(--muted);
+}

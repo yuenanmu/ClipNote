@@ -38,6 +38,26 @@ test('Markmap remains readable and split reading keeps independent view state wi
     await page.getByRole('button', { name: '选择节点 章节一', exact: true }).click();
     assert.equal(await page.getByRole('button', { name: 'Mindmap', exact: true }).getAttribute('aria-pressed'), 'true');
   });
+  await t.test('the notes canvas and controls use a rounded gradient and translucent panels', async () => {
+    const stage = page.locator('.notes-main .mindmap-stage');
+    const surface = await stage.evaluate(element => {
+      const read = node => {
+        const style = getComputedStyle(node);
+        return { gradient: style.backgroundImage, radius: parseFloat(style.borderTopLeftRadius), color: style.backgroundColor };
+      };
+      return {
+        canvas: read(element),
+        controls: read(element.querySelector('.mindmap-controls')),
+        header: read(element.closest('.reader-main').querySelector('.reader-toolbar'))
+      };
+    });
+    assert.match(surface.canvas.gradient, /gradient/);
+    for (const panel of [surface.canvas, surface.controls, surface.header]) assert.ok(panel.radius >= 12);
+    for (const panel of [surface.controls, surface.header]) {
+      const alpha = Number(panel.color.match(/^rgba\(.+, ([\d.]+)\)$/)?.[1]);
+      assert.ok(alpha > 0 && alpha < 1);
+    }
+  });
   await t.test('split mode resizes without resetting either pane and node clicks locate Markdown across pages', async () => {
     await page.getByRole('button', { name: '对照', exact: true }).click();
     const separator = page.getByRole('separator', { name: '调整 Markdown 与脑图比例' }); await separator.waitFor(); assert.equal(await ratio(), '40');
