@@ -125,7 +125,8 @@ svg { flex-shrink: 0; }
 
 /* Real-folder explorer shared by the source and notes workspaces. */
 .file-shell { min-width:0; }
-.file-sidebar { display:flex; flex-direction:column; min-width:0; min-height:0; background:#1c3038; color:#d5e1e4; }
+.file-sidebar-frame { position:relative; min-width:0; min-height:0; }
+.file-sidebar { height:100%; display:flex; flex-direction:column; min-width:0; min-height:0; background:#1c3038; color:#d5e1e4; }
 .file-brand { display:flex; gap:10px; align-items:center; padding:20px 17px 16px; font-size:21px; letter-spacing:-.7px; }
 .file-brand>span { color:#9ed8c2; display:flex; }
 .file-areas { display:flex; gap:4px; padding:0 10px 14px; border-bottom:1px solid #ffffff10; }
@@ -252,6 +253,13 @@ svg { flex-shrink: 0; }
   color: var(--ink);
   background: rgba(240, 247, 255, .38);
   border-right: 1px solid var(--edge);
+}
+.file-shell .sidebar-toggle {
+  position: absolute; top: 18px; right: 7px; z-index: 3;
+  width: 34px; min-height: 34px; padding: 0;
+}
+.file-sidebar-frame:has(.file-sidebar[hidden]) {
+  background: rgba(240, 247, 255, .38); border-right: 1px solid var(--edge);
 }
 .file-shell .file-brand { color: #173f57; }
 .file-shell .file-brand span { color: white; background: linear-gradient(145deg, #3659aa, #168478); }
@@ -446,7 +454,7 @@ svg { flex-shrink: 0; }
 .file-shell :is(.archive-entry span, .folder-picker nav button, .folder-picker-list button) { color: var(--muted); }
 
 .batch-panel { margin: 0 var(--gutter); flex: 0 0 auto; min-width: 0; }
-.batch-summary, .batch-actions, .batch-next { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
+.batch-summary, .batch-next { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
 .batch-summary { padding: 8px 0; }
 .batch-detail { display: flex; flex-direction: column; color: var(--ink); font-size: 13px; overflow: hidden; }
 .batch-detail > header, .batch-detail > footer { flex: none; padding: 9px 14px; background: var(--glass); }
@@ -461,9 +469,20 @@ svg { flex-shrink: 0; }
 .batch-next small { margin-right: auto; }
 .batch-body { flex: 1; min-height: 0; overflow: auto; overscroll-behavior: contain; padding: 11px 14px; scrollbar-gutter: stable; }
 .batch-fields, .batch-confirm dl { display: grid; grid-template-columns: repeat(2, minmax(0,1fr)); gap: 10px; }
-.batch-fields label, .batch-options label { display: grid; gap: 5px; color: var(--muted); font-weight: 600; }
-.batch-options label { display: block; padding-top: 7px; }
-.batch-options textarea { display: block; width: 100%; min-height: 58px; margin: 4px 0 6px; resize: vertical; }
+.batch-fields label, .batch-prompt label {
+  display: grid; gap: 5px; min-width: 0; color: var(--muted); font-weight: 600;
+}
+.batch-prompt {
+  display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: end;
+  gap: 8px; max-width: 430px; margin: 9px 0 3px;
+}
+.batch-link-note { margin-top: 3px; }
+.prompt-template-dialog { width: min(540px, calc(100vw - 36px)); }
+.prompt-template-dialog::backdrop { background: rgba(24, 49, 71, .39); backdrop-filter: blur(3px); }
+.prompt-template-dialog h2 { margin-bottom: 4px; }
+.prompt-template-caption { margin-top: 0; color: var(--muted); }
+.prompt-template-dialog label { display: grid; gap: 6px; margin-top: 14px; font-weight: 600; }
+.prompt-template-dialog textarea { width: 100%; resize: vertical; }
 .batch-target {
   display: flex; justify-content: space-between; align-items: center; gap: 10px;
   border: 1px solid var(--edge); border-radius: var(--control-radius); background: var(--glass);
@@ -472,7 +491,6 @@ svg { flex-shrink: 0; }
 .batch-target > div { min-width: 0; }
 .batch-target p { margin: 2px 0 0; overflow-wrap: anywhere; }
 .batch-target small { color: var(--muted); font-size: 11px; }
-.batch-options summary { width: fit-content; color: var(--accent); cursor: pointer; padding: 5px 2px; }
 .batch-confirm h3, .pending-results h3 { font-size: 14px; margin: 0 0 7px; }
 .batch-confirm p, .batch-message { line-height: 1.5; margin: 7px 0; color: var(--muted); }
 .batch-confirm dl, .batch-confirm ul { margin: 0; }
