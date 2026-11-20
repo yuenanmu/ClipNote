@@ -234,10 +234,14 @@ svg { flex-shrink: 0; }
   --ink: #213748;
   --muted: #486276;
   --accent: #116770;
-  --glass: rgba(248, 252, 255, .55);
-  --surface: rgba(252, 254, 255, .77);
-  --edge: rgba(67, 107, 134, .22);
-  --lift: 0 5px 20px rgba(37, 65, 90, .08);
+  --glass: rgba(220, 237, 246, .38);
+  --surface: linear-gradient(132deg, rgba(215, 230, 248, .62), rgba(211, 237, 232, .64));
+  --paper: linear-gradient(132deg, rgba(225, 237, 250, .62), rgba(217, 239, 234, .62));
+  --inset: rgba(178, 211, 228, .23);
+  --field: rgba(210, 229, 240, .65);
+  --menu: linear-gradient(132deg, #deebf9, #d4ece7);
+  --edge: rgba(67, 107, 134, .19);
+  --lift: 0 4px 16px rgba(37, 65, 90, .07);
   --radius: 14px;
   --control-radius: 9px;
   --selection: linear-gradient(125deg, rgba(175, 201, 239, .56), rgba(169, 221, 208, .52));
@@ -245,13 +249,14 @@ svg { flex-shrink: 0; }
 }
 .file-shell {
   color: var(--ink);
+  scrollbar-color: #7d9faf transparent;
   background: linear-gradient(122deg, #d5e0f5, #e7f1f7 48%, #cfeae5);
 }
 .file-shell .file-content, .file-shell .settings-view, .file-shell .desktop,
 .file-shell .video-queue-desktop { background: transparent; }
 .file-shell .file-sidebar {
   color: var(--ink);
-  background: rgba(240, 247, 255, .38);
+  background: var(--glass);
   border-right: 1px solid var(--edge);
 }
 .file-shell .sidebar-toggle {
@@ -259,7 +264,7 @@ svg { flex-shrink: 0; }
   width: 34px; min-height: 34px; padding: 0;
 }
 .file-sidebar-frame:has(.file-sidebar[hidden]) {
-  background: rgba(240, 247, 255, .38); border-right: 1px solid var(--edge);
+  background: var(--glass); border-right: 1px solid var(--edge);
 }
 .file-shell .file-brand { color: #173f57; }
 .file-shell .file-brand span { color: white; background: linear-gradient(145deg, #3659aa, #168478); }
@@ -289,7 +294,7 @@ svg { flex-shrink: 0; }
 .file-shell :is(.secondary, .quiet):not(:disabled):hover { background: var(--selection); border-color: var(--edge); }
 .file-shell .quiet { min-height: 30px; }
 .file-shell :is(.primary, .secondary):disabled {
-  opacity: 1; color: #536e81; background: rgba(246, 251, 255, .4);
+  opacity: 1; color: #536e81; background: rgba(218, 234, 243, .35);
   border-color: rgba(69, 109, 138, .14); box-shadow: none; cursor: default;
 }
 .file-shell .quiet.danger { color: #8e4148; }
@@ -300,10 +305,12 @@ svg { flex-shrink: 0; }
   outline: 2px solid #19788a;
   outline-offset: 2px;
 }
-.file-shell .source-desktop .workspace,
-.file-shell .reader-scroll, .file-shell .note-editor-text { background: #fbfdff; }
-.file-shell .reader-main, .file-shell .note-editor-pane { background: rgba(247, 251, 255, .38); }
-.file-shell .reader-embedded .reader-outline { background: #e2edf5; color: var(--ink); }
+.file-shell .source-desktop .workspace { background: var(--paper); }
+.file-shell .reader-embedded .reader-outline { color: var(--ink); }
+.file-shell :is(.reader-scroll, .note-editor-text, .workspace, .inspector, .batch-body, .video-queue-body, .settings-view, .file-dialog) {
+  scrollbar-width: thin;
+}
+.file-shell .explorer-scroll { scrollbar-color: inherit; }
 .file-shell .reader-embedded .reader-outline button { color: var(--ink); }
 .file-shell .outline-heading,.file-shell .outline-heading span { color: var(--muted); }
 .file-shell :is(.batch-detail, .smartsub-card, .settings-card, .video-composer,
@@ -331,7 +338,7 @@ svg { flex-shrink: 0; }
 .video-stage { background: #dfeaf5; color: #214a68; padding: 4px 8px; border-radius: 20px; flex-shrink: 0; font-size: 12px; }
 .video-stage.ready { background: #d9f0e8; color: #205c50; }
 .video-stage.failed,.video-stage.blocked { background: #f8e5d1; color: #7b4216; }
-.subtitle-preview { width: 100%; padding: 12px; background: #fbfdff; border-radius: 8px; }
+.subtitle-preview { width: 100%; padding: 12px; background: var(--paper); border-radius: var(--control-radius); }
 .subtitle-preview p { white-space: pre-wrap; overflow-wrap: anywhere; margin-bottom: 0; }
 .subtitle-preview > span { margin-left: 8px; color: var(--muted); font-size: 12px; }
 
@@ -343,7 +350,7 @@ svg { flex-shrink: 0; }
 .file-shell .explorer-root,.file-shell .explorer-status { background:#dfedf7; color:#234559; }
 .file-shell .explorer-root.drop-target,.file-shell .explorer-row.drop-target { background:#b4dfd5; color:#163f47; }
 .file-shell .file-chevron,.file-shell .explorer-row>svg,.file-shell .explorer-root>svg { color:#47788b; }
-.file-shell .workspace-tree.explorer input:not([type=checkbox]) { background:#f8fcff; color:#233746; border-color:#779dab; }
+.file-shell .workspace-tree.explorer input:not([type=checkbox]) { background:var(--field); color:var(--ink); border-color:#779dab; }
 .file-shell .explorer-search-summary,.file-shell .explorer-more,.file-shell .file-sidebar-bottom button { color:var(--muted); }
 .file-shell .file-brand>span { display:grid; place-items:center; width:32px; height:32px; border-radius:9px; }
 
@@ -354,7 +361,7 @@ svg { flex-shrink: 0; }
   border: 1px solid var(--edge); border-radius: var(--control-radius); background: var(--glass); color: var(--ink);
 }
 .file-shell .workspace-tree.explorer .explorer-empty button:hover { background: var(--selection); }
-.file-shell .file-context { color: var(--ink); background: #f3f9fc; border-color: var(--edge); border-radius: var(--control-radius); }
+.file-shell .file-context { color: var(--ink); background: var(--menu); border-color: var(--edge); border-radius: var(--control-radius); }
 .file-shell .workspace-tree.explorer .file-context button:hover { background: var(--selection); }
 
 .file-shell .explorer-heading strong { color:#24475c; }
@@ -381,7 +388,6 @@ svg { flex-shrink: 0; }
   padding: clamp(14px, 2vw, 24px);
   border: 1px solid var(--edge); border-radius: var(--radius);
 }
-.file-shell .source-desktop .workspace:has(.welcome) { background: var(--glass); }
 .file-shell .source-desktop > .notice { margin: 0 var(--gutter) 8px; }
 .file-shell .source-head { margin-bottom: 12px; }
 .file-shell :is(.source-head span:last-child, .inspector-placeholder p, .inspector dt, .inspector .path, .excerpt) { color: var(--muted); }
@@ -397,23 +403,51 @@ svg { flex-shrink: 0; }
 .file-shell :is(.view-tabs button:hover, .view-tabs button.active, .original-link:hover, .pagination button:not(:disabled):hover) {
   background: var(--selection); color: #254a62;
 }
-.file-shell .segment { border-color: var(--edge); border-radius: var(--control-radius); }
-.file-shell .segment:hover, .file-shell .segment.active { border-color: #6cabb5; background: #f3fafb; }
-.file-shell .segment-meta { color: var(--muted); }
+.file-shell :is(.segment, .raw-source, .original-link, .pagination button) {
+  background: var(--inset); color: var(--ink); border-color: var(--edge); border-radius: var(--control-radius);
+}
+.file-shell .segment:hover, .file-shell .segment.active { border-color: #76a7b4; background: var(--selection); }
+.file-shell :is(.segment-meta, .segment small, .preview-note, .pagination) { color: var(--muted); }
+.file-shell :is(.segment-meta .time, .source-location) { color: #306962; }
+.file-shell .source-head .format-badge { background: var(--inset); color: #275e67; border-color: var(--edge); }
+.file-shell .raw-source mark { background: #b6ddd5; }
 
-.file-shell :is(.batch-panel, .settings-view, .smartsub-workspace, .video-composer, .file-dialog) :is(input:not([type="checkbox"]), select, textarea),
-.file-shell .video-result select {
+.file-shell :is(.batch-panel, .settings-view, .smartsub-workspace, .video-composer, .file-dialog) :is(input:not([type="checkbox"]), textarea),
+.file-shell select {
   min-width: 0; min-height: 36px; padding: 8px 11px; border: 1px solid var(--edge);
-  border-radius: var(--control-radius); background-color: rgba(253, 255, 255, .85); color: var(--ink); font: inherit;
+  border-radius: var(--control-radius); background-color: var(--field); color: var(--ink); font: inherit;
 }
-.file-shell :is(.batch-panel, .settings-view, .smartsub-workspace, .video-composer, .video-result) select {
-  appearance: none;
-  padding-right: 30px;
-  background-image: linear-gradient(45deg, transparent 50%, #486779 50%), linear-gradient(135deg, #486779 50%, transparent 50%);
-  background-position: right 15px center, right 10px center;
-  background-size: 5px 5px;
-  background-repeat: no-repeat;
+@supports (appearance: base-select) and selector(select::picker(select)) {
+  .file-shell select, .file-shell select::picker(select) { appearance: base-select; }
+  .file-shell select { align-items: center; gap: 8px; }
+  .file-shell select::picker-icon { color: var(--muted); }
+  .file-shell select:open::picker-icon { transform: rotate(180deg); }
+  .file-shell select::picker(select) {
+    color: var(--ink);
+    background: var(--menu);
+    border: 1px solid var(--edge);
+    border-radius: var(--radius);
+    box-shadow: 0 8px 24px rgba(32, 66, 88, .16);
+    margin-block: 4px;
+    padding: 4px;
+    max-block-size: min(280px, 48vh);
+    max-inline-size: calc(100vw - 24px);
+    overflow: auto;
+    scrollbar-width: thin;
+  }
+  .file-shell select option {
+    padding: 7px 9px;
+    border-radius: 7px;
+    font: inherit;
+    overflow-wrap: anywhere;
+  }
+  .file-shell select option:checked,
+  .file-shell select option:not(:disabled):hover,
+  .file-shell select option:focus-visible { background: var(--selection); }
+  .file-shell select option::checkmark { order: 1; margin-inline-start: auto; color: var(--accent); }
 }
+.file-shell select:disabled { opacity: .58; }
+
 .file-shell :is(select, textarea, input)::placeholder { color: var(--muted); }
 .file-shell .settings-tabs {
   margin: 8px var(--gutter) 0; padding: 6px; flex-wrap: wrap;
@@ -432,7 +466,7 @@ svg { flex-shrink: 0; }
 .file-shell .api-profile-list > header .secondary { padding-inline: 9px; }
 .file-shell :is(.api-receiver, .installation-path, .notice) {
   padding: 10px 12px; border: 1px solid var(--edge); border-radius: var(--control-radius);
-  background: rgba(228, 243, 247, .66); color: var(--muted);
+  background: var(--inset); color: var(--muted);
 }
 .file-shell .notice.error { background: #fff0ef; color: #8c3f3d; border-color: #e7c5c1; }
 .file-shell .smartsub-workspace { background: transparent; }
@@ -444,7 +478,7 @@ svg { flex-shrink: 0; }
 .file-shell :is(.smartsub-card p, .settings-card p, .api-panel p, .archive-panel header p) { color: var(--muted); }
 .file-shell :is(.task-card, .archive-entry) { border-color: var(--edge); }
 .file-shell .file-dialog-shade { background: rgba(24, 49, 71, .39); backdrop-filter: blur(3px); }
-.file-shell .file-dialog { color: var(--ink); background: rgba(245, 251, 255, .94); }
+.file-shell .file-dialog { color: var(--ink); background: var(--menu); }
 .file-shell .archive-list { display: grid; gap: 7px; }
 .file-shell .archive-entry {
   border: 1px solid var(--edge); border-radius: var(--control-radius);
@@ -523,11 +557,7 @@ svg { flex-shrink: 0; }
 /* Notes workbench. Keep the reader grid and zoom viewport geometry. */
 .file-shell .notes-main {
   --notes-radius: 16px;
-  --notes-glass: rgba(248, 252, 255, .62);
-  --notes-line: rgba(82, 124, 150, .23);
-  background:
-    radial-gradient(ellipse at 95% 10%, #bce9de 0%, transparent 59%),
-    linear-gradient(141deg, #d2dff4, #e3f0f5 62%, #d6ebee);
+  --notes-line: var(--edge);
 }
 
 .file-shell .notes-main .reader-shell,
@@ -539,7 +569,7 @@ svg { flex-shrink: 0; }
 .file-shell .notes-main .reader-footer,
 .file-shell .notes-main .note-editor-pane > footer,
 .file-shell .notes-main .notes-welcome > .toolbar {
-  background: var(--notes-glass);
+  background: var(--glass);
   border-color: var(--notes-line);
 }
 
@@ -554,7 +584,7 @@ svg { flex-shrink: 0; }
 }
 
 .file-shell .notes-main .reader-outline {
-  background: rgba(246, 252, 255, .63);
+  background: var(--surface);
   border-radius: var(--notes-radius);
   box-shadow: inset 0 0 0 1px var(--notes-line);
 }
@@ -571,10 +601,19 @@ svg { flex-shrink: 0; }
 
 .file-shell .notes-main .reader-scroll,
 .file-shell .notes-main .note-editor-text {
-  background: rgba(253, 255, 255, .88);
+  background: var(--paper);
+  color: var(--ink);
   border-radius: var(--notes-radius);
   box-shadow: inset 0 0 0 1px var(--notes-line);
 }
+
+.file-shell .notes-main .markdown-body :is(pre, code, blockquote, tr:first-child, .reader-image-placeholder) {
+  background: var(--inset);
+  border-color: var(--edge);
+}
+.file-shell .notes-main .markdown-body pre code { background: transparent; }
+.file-shell .notes-main .markdown-body :is(blockquote, .reader-image-placeholder) { color: var(--muted); }
+.file-shell .notes-main .markdown-body :is([data-reader-anchor]:focus, [data-reader-active="true"]) { background: var(--selection); }
 
 .file-shell .notes-main .mindmap-stage {
   background:
@@ -609,7 +648,7 @@ svg { flex-shrink: 0; }
 
 .file-shell .notes-main .notes-welcome > div {
   max-width: 100%;
-  background: var(--notes-glass);
+  background: var(--glass);
   border-radius: var(--notes-radius);
   box-shadow: inset 0 0 0 1px var(--notes-line), var(--lift);
   color: var(--muted);
