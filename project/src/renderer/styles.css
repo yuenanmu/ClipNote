@@ -259,9 +259,9 @@ svg { flex-shrink: 0; }
   background: var(--glass);
   border-right: 1px solid var(--edge);
 }
-.file-shell .sidebar-toggle {
+.file-shell .secondary.sidebar-toggle {
   position: absolute; top: 18px; right: 7px; z-index: 3;
-  width: 34px; min-height: 34px; padding: 0;
+  width: 34px; min-height: 34px; padding: 0; border-radius: 50%;
 }
 .file-sidebar-frame:has(.file-sidebar[hidden]) {
   background: var(--glass); border-right: 1px solid var(--edge);

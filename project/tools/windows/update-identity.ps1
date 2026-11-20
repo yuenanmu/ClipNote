@@ -14,9 +14,46 @@ public static class Resources {
  [DllImport("kernel32")] public static extern bool FreeLibrary(IntPtr h);
 }
 "@
+$ErrorActionPreference='Stop'
 $source=(Resolve-Path -LiteralPath $Source).Path
 $target=(Resolve-Path -LiteralPath $Target).Path
-$lib=[Resources]::LoadLibraryEx($source,[IntPtr]::Zero,2);if($lib -eq [IntPtr]::Zero){throw 'load failed'}
-$up=[Resources]::BeginUpdateResource($target,$false);if($up -eq [IntPtr]::Zero){throw 'update failed'}
-foreach($pair in @(@(16,1,1),@(14,101,1),@(3,1,1))){$type=[IntPtr]$pair[0];$name=[IntPtr]$pair[1];$targetName=[IntPtr]$pair[2];$resource=[Resources]::FindResource($lib,$name,$type);if($resource -eq [IntPtr]::Zero){throw "resource missing $pair"};$size=[Resources]::SizeofResource($lib,$resource);$data=New-Object byte[] $size;[Runtime.InteropServices.Marshal]::Copy([Resources]::LockResource([Resources]::LoadResource($lib,$resource)),$data,0,$size);if(-not [Resources]::UpdateResource($up,$type,$targetName,1033,$data,$size)){throw 'write failed'}}
-if(-not [Resources]::EndUpdateResource($up,$false)){throw 'commit failed'};[void][Resources]::FreeLibrary($lib)
+$lib=[Resources]::LoadLibraryEx($source,[IntPtr]::Zero,2)
+if($lib -eq [IntPtr]::Zero){throw 'Unable to load Windows resources.'}
+$update=[IntPtr]::Zero
+
+function Read-Resource([int]$type,[int]$name) {
+  $resource=[Resources]::FindResource($lib,[IntPtr]$name,[IntPtr]$type)
+  if($resource -eq [IntPtr]::Zero){throw "Resource missing ($type, $name)."}
+  $size=[Resources]::SizeofResource($lib,$resource)
+  $data=New-Object byte[] $size
+  [Runtime.InteropServices.Marshal]::Copy([Resources]::LockResource([Resources]::LoadResource($lib,$resource)),$data,0,$size)
+  return ,$data
+}
+
+function Write-Resource([int]$type,[int]$name,[byte[]]$data) {
+  if(-not [Resources]::UpdateResource($update,[IntPtr]$type,[IntPtr]$name,1033,$data,$data.Length)){
+    throw "Unable to write Windows resource ($type, $name)."
+  }
+}
+
+try {
+  $group=Read-Resource 14 101
+  if($group.Length -lt 6 -or [BitConverter]::ToUInt16($group,2) -ne 1){throw 'Invalid icon group.'}
+  $count=[BitConverter]::ToUInt16($group,4)
+  if($count -lt 1 -or $group.Length -ne (6+14*$count)){throw 'Invalid icon directory.'}
+
+  $update=[Resources]::BeginUpdateResource($target,$false)
+  if($update -eq [IntPtr]::Zero){throw 'Unable to update executable resources.'}
+  Write-Resource 16 1 (Read-Resource 16 1)
+  for($index=0;$index -lt $count;$index++){
+    $id=[BitConverter]::ToUInt16($group,6+14*$index+12)
+    Write-Resource 3 $id (Read-Resource 3 $id)
+  }
+  Write-Resource 14 1 $group
+  $committed=[Resources]::EndUpdateResource($update,$false)
+  $update=[IntPtr]::Zero
+  if(-not $committed){throw 'Unable to save executable resources.'}
+} finally {
+  if($update -ne [IntPtr]::Zero){[void][Resources]::EndUpdateResource($update,$true)}
+  [void][Resources]::FreeLibrary($lib)
+}

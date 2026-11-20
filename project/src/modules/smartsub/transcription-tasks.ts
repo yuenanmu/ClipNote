@@ -1,12 +1,12 @@
 import {randomUUID} from 'node:crypto';
 import {lstat} from 'node:fs/promises';
-import {dirname,join,resolve} from 'node:path';
+import {dirname,extname,join,resolve} from 'node:path';
 import {checkedDirectory,digest,exists,isUuid,readBytes,readJson,writeAtomic} from '../storage/io.ts';
 import {inspectTranscription,type TranscriptionSelection} from './transcription.ts';
 import {makeTaskRequest,makeSubtitleReadRequest} from './requests.ts';
 import {parseTaskReceipt,type SmartSubTaskStatus} from './receipts.ts';
 import {loadSmartSubSubtitle} from './subtitles.ts';
-import {decodeSourceBytes,MAX_FILE_BYTES} from '../source/parser.ts';
+import {decodeSourceBytes,MAX_FILE_BYTES,parseSource} from '../source/parser.ts';
 import {SourceImportError} from '../source/errors.ts';
 import {transcriptionOutputMessages,type TranscriptionOutputIssue,type SmartSubTaskView} from '../../contracts/smartsub.ts';
 
@@ -38,9 +38,17 @@ async function checkTranscriptionOutputs(paths:string[]):Promise<TranscriptionOu
       const file=await lstat(path);
       if(!file.isFile() || file.isSymbolicLink())continue;
       if(file.size>MAX_FILE_BYTES)return; // Reading it later will report the size limit.
-      if(file.size && decodeSourceBytes(await readBytes(path,MAX_FILE_BYTES)).rawText.trim())return;
+      if(file.size) {
+        const bytes=await readBytes(path,MAX_FILE_BYTES);
+        if(extname(path).toLowerCase()==='.vtt') {
+          parseSource(bytes,path);
+          return;
+        }
+        if(decodeSourceBytes(bytes).rawText.trim())return;
+      }
       hasEmptyFile=true;
     } catch(error) {
+      if(error instanceof SourceImportError && error.code==='EMPTY_FILE'){hasEmptyFile=true;continue;}
       if(missingFile(error) || (error as NodeJS.ErrnoException | undefined)?.code==='UNSAFE_PATH')continue;
       // Preserve the dedicated format or permission error from the normal reader.
       return;

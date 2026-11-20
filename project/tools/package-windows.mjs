@@ -4,6 +4,7 @@ import {execFileSync} from 'node:child_process';
 import {buildProvenance} from './build-provenance.mjs';
 if(process.platform!=='win32')throw new Error('Windows packaging must run on Windows.');
 const root=process.cwd(),outRoot=resolve(root,'../.local/releases');
+const {version}=JSON.parse(await readFile(resolve(root,'package.json'),'utf8'));
 execFileSync(process.execPath,['tools/build-desktop.mjs'],{cwd:root,stdio:'inherit'});await mkdir(outRoot,{recursive:true});
 const output=await mkdtemp(join(outRoot,'ClipNote-candidate-'));const electron=resolve(root,'node_modules/electron/dist');await cp(electron,output,{recursive:true});
 await rename(join(output,'electron.exe'),join(output,'ClipNote.exe'));
@@ -12,7 +13,7 @@ execFileSync('windres',['clipnote.rc','-O','coff','-o',object],{cwd:resourceDir}
 execFileSync('powershell.exe',['-NoProfile','-File',join(resourceDir,'update-identity.ps1'),'-Source',library,'-Target',join(output,'ClipNote.exe')]);
 const {unlink}=await import('node:fs/promises');await unlink(object);await unlink(library);
 const app=join(output,'resources','app');await mkdir(app,{recursive:true});await cp(resolve(root,'dist'),join(app,'dist'),{recursive:true});
-await writeFile(join(app,'package.json'),JSON.stringify({name:'clipnote',productName:'ClipNote',version:'0.1.0-candidate',main:'dist/main/index.cjs'},null,2));
+await writeFile(join(app,'package.json'),JSON.stringify({name:'clipnote',productName:'ClipNote',version:version+'-candidate',main:'dist/main/index.cjs'},null,2));
 const npmCli=process.env.npm_execpath ?? join(dirname(process.execPath),'node_modules','npm','bin','npm-cli.js');
 const paths=execFileSync(process.execPath,[npmCli,'ls','--omit=dev','--all','--parseable'],{cwd:root,encoding:'utf8'}).split(/\r?\n/).slice(1).filter(Boolean);
 const inventory=new Map(),missingNotices=new Map();

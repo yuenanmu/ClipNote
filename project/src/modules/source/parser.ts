@@ -99,6 +99,6 @@ export function parseSource(bytes: Uint8Array, originalPath: string): SourceDocu
     segments.push(segment);
     if (segments.length > MAX_SEGMENTS) throw new SourceImportError('TOO_MANY_SEGMENTS');
   }
-  if (!segments.length) throw new SourceImportError('INVALID_SUBTITLE');
+  if (!segments.length) throw new SourceImportError(format==='vtt'?'EMPTY_FILE':'INVALID_SUBTITLE');
   return { sourceId, sourceType: 'file', originalPath, fileName: basename(originalPath), format, encoding, checksum, rawText, segments };
 }

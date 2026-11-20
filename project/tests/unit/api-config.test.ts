@@ -63,3 +63,18 @@ test('a legacy profile retains its key and a default switch cannot change a conf
   await assert.rejects(restarted.credentials(first),isCode('INVALID_CONFIG'));
   assert.equal((await restarted.credentials()).apiKey,'synthetic-other-key');
 });
+
+test('migration preserves a stored endpoint while other profiles are saved',async t=>{
+  const dir=await fixture(t),store=new ApiConfigStore(dir,protector);
+  const {apiKey,...legacy}=config;
+  const baseUrl=legacy.baseUrl+'///';
+  const encryptedKey=(await protector.encryptStringAsync(apiKey)).toString('base64');
+  await writeFile(join(dir,'api.json'),JSON.stringify({...legacy,baseUrl,version:1,encryptedKey}));
+  const initial=(await store.profiles()).profiles[0];
+  assert.equal(initial.baseUrl,baseUrl);
+  await store.saveProfile({...config,name:'第二套'});
+  assert.equal((await store.credentials({id:initial.id,revision:initial.revision})).baseUrl,baseUrl);
+  const updated=await store.saveProfile({...initial,name:'新名称',apiKey:''});
+  assert.equal(updated.revision,initial.revision);
+  assert.equal(updated.baseUrl,baseUrl);
+});

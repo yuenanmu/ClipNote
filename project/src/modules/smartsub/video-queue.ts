@@ -42,7 +42,7 @@ const activeStage=(lane:Lane):Active=>lane==='download'?'downloading':'transcrib
 const waitingStage=(lane:Lane):VideoStage=>lane==='download'?'queued':'waiting-transcription';
 const validSelection=(value:unknown):value is SmartSubSelection=>!!value && typeof value==='object' &&
   'engine' in value && typeof value.engine==='string' && !!value.engine && value.engine.length<100 &&
-  'model' in value && typeof value.model==='string' && !!value.model && value.model.length<200;
+  'model' in value && typeof value.model==='string' && !!value.model && value.model.length<=200;
 const MAX_ITEMS=200;
 
 export class VideoQueue {
@@ -181,9 +181,9 @@ export class VideoQueue {
     await this.patch(id,item=>{
       if(item!==previous) return item;
       this.issue.delete(id);
-      if(item.lane==='transcription') return {...item,stage:'waiting-transcription',selection,autoTranscribe:true,remoteCancelling:false,
+      if(item.lane==='transcription') return {...item,stage:'waiting-transcription',selection,autoTranscribe:true,remoteCancelling:false,cancelRequested:false,
         retryTranscription:!!item.retryTranscription||!!item.attemptId,attemptId:undefined,confirmed:false,message:undefined};
-      return {...item,stage:'queued',requestId:randomUUID(),confirmed:false,remoteCancelling:false,message:undefined};
+      return {...item,stage:'queued',requestId:randomUUID(),confirmed:false,remoteCancelling:false,cancelRequested:false,message:undefined};
     });
     this.wake();
   }
@@ -216,7 +216,11 @@ export class VideoQueue {
       else await this.beginTranscription(row);
     } catch(error) {
       if (error instanceof TranscriptionResourceError) {
-        await this.patch(row.id,item=>item.stage==='transcribing'?{...item,stage:'blocked',message:error.message,attemptId:undefined}:item);
+        await this.patch(row.id,item=>{
+          if(item.stage!=='transcribing')return item;
+          return {...item,stage:item.cancelRequested?'cancelled':'blocked',attemptId:undefined,
+            message:item.cancelRequested?undefined:error.message,cancelRequested:false};
+        });
       } else this.queryFailed(row.id);
     } finally {this.running.delete(lane);}
   }

@@ -29,7 +29,9 @@ function settings(value: Omit<ApiConfigInput, 'apiKey'>): Omit<ApiConfigInput, '
 function storedConfig(raw: any) {
   const encryptedKey = raw.encryptedKey;
   if (typeof encryptedKey !== 'string' || !encryptedKey || !/^[A-Za-z0-9+/]+={0,2}$/.test(encryptedKey) || encryptedKey.length > 12000) throw new Error('invalid');
-  return {...validate({...settings(raw), apiKey:'placeholder'}), encryptedKey};
+  const saved=settings(raw);
+  validate({...saved,apiKey:'placeholder'});
+  return {...saved,encryptedKey};
 }
 export function normalizeBaseUrl(baseUrl: string): string {
   if (typeof baseUrl !== 'string' || baseUrl.length > 2048) throw new ApiError('INVALID_CONFIG');
@@ -97,6 +99,7 @@ export class ApiConfigStore {
   }
   private async store(data:Stored, input:ApiConfigInput, name:string, previous?:StoredProfile) {
     const config=validate(input);
+    if(previous?.baseUrl===input.baseUrl)config.baseUrl=previous.baseUrl;
     if (!input.apiKey && (!previous || previous.baseUrl!==config.baseUrl)) throw new ApiError('KEY_REQUIRED');
     if (!previous && data.profiles.length>=MAX_PROFILES) throw new ApiError('INVALID_CONFIG');
     await this.requireEncryption();

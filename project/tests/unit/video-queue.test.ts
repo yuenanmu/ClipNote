@@ -4,6 +4,7 @@ import {mkdir,mkdtemp,readFile,rm} from 'node:fs/promises';
 import {join} from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {VideoQueue} from '../../src/modules/smartsub/video-queue.ts';
+import {TranscriptionResourceError} from '../../src/modules/smartsub/transcription-tasks.ts';
 import type {SmartSubTaskView} from '../../src/contracts/smartsub.ts';
 
 test('a download overlaps exactly one transcription and restart waits before new work',async t=>{
@@ -109,4 +110,39 @@ test('a failed transcription leaves other results usable and can retry after the
   assert.deepEqual((await queue.state()).items.map(item=>item.stage),['ready','ready']);
   assert.deepEqual(attempts.map(attempt=>attempt.retry),[false,true]);
   assert.notEqual(attempts[0].id,attempts[1].id);
+});
+
+test('cancelling during a resource failure settles the attempt and the queue can reopen long model names',async t=>{
+  const base=fileURLToPath(new URL('../../../.local/test-artifacts/',import.meta.url));
+  await mkdir(base,{recursive:true});const own=await mkdtemp(join(base,'queue-resource-race-'));
+  t.after(()=>rm(own,{recursive:true,force:true}));
+  const path=join(own,'queue.json');
+  const selection={engine:'builtin',model:'x'.repeat(200)};
+  const task=(requestId:string,status:SmartSubTaskView['status'])=>({requestId,status,subtitleCount:0,hasSubtitles:false});
+  let onSubmit!:()=>void,fail!:()=>void;
+  const submitting=new Promise<void>(resolve=>{onSubmit=resolve;});
+  const failing=new Promise<never>((_resolve,reject)=>{fail=()=>reject(new TranscriptionResourceError('model unavailable'));});
+  const deps={
+    encrypt:async (link:string)=>Buffer.from(link).toString('base64'),
+    decrypt:async (link:string)=>Buffer.from(link,'base64').toString('utf8'),
+    selection:async()=>selection,prepare:async()=>{},
+    download:async(id:string)=>task(id,'completed'),
+    downloadStatus:async(id:string)=>task(id,'completed'),
+    cancelDownload:async(id:string)=>task(id,'cancelled'),
+    transcriptionReady:async()=>({ready:true as const,...selection}),
+    transcribe:()=>{onSubmit();return failing;},
+    transcriptionStatus:async(id:string)=>task(id,'running'),
+    cancelTranscription:async(id:string)=>task(id,'cancelled'),
+  };
+  const queue=new VideoQueue(path,deps);
+  await queue.add('https://example.invalid/link',true);
+  await queue.tick();
+  const ticking=queue.tick();
+  await submitting;
+  const [active]=(await queue.state()).items;
+  await queue.cancel(active.id);
+  fail();await ticking;
+  assert.equal((await queue.state()).items[0].stage,'cancelled');
+  const restored=new VideoQueue(path,deps);
+  assert.equal((await restored.state()).items[0].cancelRequested,false);
 });

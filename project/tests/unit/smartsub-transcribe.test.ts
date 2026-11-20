@@ -78,15 +78,15 @@ test('a completed job with only empty exports is unusable and retry keeps the do
   const base=fileURLToPath(new URL('../../../.local/test-artifacts/',import.meta.url));
   await mkdir(base,{recursive:true});
   const root=await mkdtemp(join(base,'clipnote-empty-export-'));t.after(()=>rm(root,{recursive:true,force:true}));
-  const parent=randomUUID(),video=join(root,'sample.mp4'),txt=join(root,'result.txt'),srt=join(root,'result.srt');
-  await writeFile(video,'synthetic audio');await writeFile(txt,'');await writeFile(srt,'');
+  const parent=randomUUID(),video=join(root,'sample.mp4'),txt=join(root,'result.txt'),srt=join(root,'result.srt'),vtt=join(root,'result.vtt');
+  await writeFile(video,'synthetic audio');await writeFile(txt,'');await writeFile(srt,'');await writeFile(vtt,'WEBVTT\n\nNOTE only metadata');
   const ids:string[]=[];
   const invoke=async(op:string,input:any):Promise<any>=>{
     if(op==='settings.get')return {defaults:{transcriptionEngine:'builtin',model:'small'}};
     if(op==='engines.list')return {builtin:{state:'ready'}};
     if(op==='models.list')return {modelsInstalled:['small']};
     if(op==='transcribe'){assert.deepEqual(input.files,[video]);ids.push(input.requestId);return {id:'job-'+ids.length,status:'running'};}
-    if(op==='tasks.get') return {id:input.id,status:'completed',artifacts:[{kind:'txt',path:txt},{kind:'srt',path:srt}]};
+    if(op==='tasks.get') return {id:input.id,status:'completed',artifacts:[{kind:'txt',path:txt},{kind:'srt',path:srt},{kind:'vtt',path:vtt}]};
     throw Error('unexpected');
   };
   const tasks=new TranscriptionTasks(root,invoke,async()=>({id:'download',status:'completed',subtitlePaths:[],mediaPaths:[video],hasSubtitles:false}));
@@ -102,4 +102,5 @@ test('a completed job with only empty exports is unusable and retry keeps the do
   assert.equal((await tasks.refresh(parent)).transcriptionOutputIssue,undefined);
   assert.equal((await tasks.subtitle(parent,0)).document.rawText,'有效字幕');
   await assert.rejects(tasks.subtitle(parent,1),{issue:'empty',allUnavailable:false});
+  await assert.rejects(tasks.subtitle(parent,2),{issue:'empty',allUnavailable:false});
 });

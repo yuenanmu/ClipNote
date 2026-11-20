@@ -1,6 +1,6 @@
 {
   "name": "clipnote",
-  "version": "0.0.0",
+  "version": "0.3.0",
   "private": true,
   "type": "module",
   "description": "ClipNote 桌面文件工作台与接入验证工具",
@@ -13,6 +13,7 @@
     "test:integration": "node --test tests/integration/*.test.mjs",
     "test:e2e": "node --test --test-concurrency=1 tests/e2e/*.test.mjs",
     "test:packaged": "node tools/test-packaged.mjs",
+    "package:windows": "node tools/package-bundled-experiment.mjs --release",
     "typecheck": "tsc --noEmit",
     "build": "node tools/build-desktop.mjs",
     "start": "node tools/start-desktop.mjs",

@@ -88,6 +88,7 @@ test('the persistent sidebar toggle expands the work area without replacing the 
   const hide=()=>page.getByRole('button',{name:'隐藏侧边栏',exact:true});
   const show=()=>page.getByRole('button',{name:'显示侧边栏',exact:true});
   const content=()=>page.locator('.file-content').boundingBox();
+  assert.equal(await hide().evaluate(button=>getComputedStyle(button).borderRadius),'50%');
   const expanded=await content();
   await hide().press('Enter');
   assert.equal(await show().getAttribute('aria-expanded'),'false');
