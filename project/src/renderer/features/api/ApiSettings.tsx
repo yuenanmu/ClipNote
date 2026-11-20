@@ -95,13 +95,13 @@ export function ApiSettings({onBack,embedded=false}:{onBack():void;embedded?:boo
           <button className="primary" onClick={save} disabled={busy}>保存设置</button>
           <button className="secondary" onClick={testConnection} disabled={busy || changed}>测试连接</button>
           {selected && selected.id!==services.defaultId && <button className="secondary" onClick={setDefault} disabled={busy}>设为默认</button>}
-          {selected && <button className="quiet" onClick={()=>setDeleting(true)} disabled={busy}>删除服务</button>}
+          {selected && <button className="quiet danger" onClick={()=>setDeleting(true)} disabled={busy}>删除服务</button>}
           {activity && <button className="secondary" onClick={()=>void window.clipnote.apiCancel()}>{activity==='models'?'取消获取':'取消测试'}</button>}
         </div>
         {selected && <p className="api-receiver">测试连接将向 <strong>{selected.baseUrl}</strong> 的 <strong>{selected.model}</strong> 发送固定短文本，可能产生费用。</p>}
         {notice && <div className={`notice ${notice.error?'error':''}`} role={notice.error?'alert':'status'}>{notice.text}</div>}
         {deleting && <div className="file-dialog-shade"><section className="file-dialog" role="dialog" aria-modal="true" aria-label="删除 API 服务">
-          <h3>删除「{selected?.name}」？</h3><footer><button className="secondary" onClick={()=>setDeleting(false)}>取消</button><button className="primary" disabled={busy} onClick={remove}>确认删除</button></footer>
+          <h3>删除「{selected?.name}」？</h3><footer><button className="secondary" onClick={()=>setDeleting(false)}>取消</button><button className="primary danger" disabled={busy} onClick={remove}>确认删除</button></footer>
         </section></div>}
       </section>
     </main>

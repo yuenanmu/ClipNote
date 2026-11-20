@@ -14,12 +14,13 @@ export function SourceWorkspace({document,importFile,busy=false}:{document?:Sour
       <div className="content-layout">
         <section className="workspace" aria-label="来源工作区">
           {!document ? <div className="welcome">
-            <p className="eyebrow">从来源开始</p><h2>从一份资料开始。</h2><p className="intro">导入字幕或文本，查看内容与来源位置。<br />先把原文完整留下，再向下一步出发。</p>
-            <div className="import-card"><div className="document-art"><Icon size={43} /></div><h3>选择字幕或文本</h3><p>支持带时间的字幕，也支持已有文字资料。</p>
+            <div className="import-card">
+              <div className="document-art"><Icon size={30} /></div>
+              <h2>导入本地资料</h2>
+              <p>打开字幕、文本或 Markdown，按时间或行号查找原文。</p>
               <button className="primary" disabled={busy} onClick={() => void importFile()}><Icon name="plus" size={17} />{busy ? '正在处理…' : '选择本地文件'}</button>
-              <div className="formats">{['SRT', 'VTT', 'TXT', 'MD'].map(format => <span key={format}>{format}</span>)}</div><p className="size-note">单文件不超过 16 MiB</p>
+              <p className="size-note">SRT、VTT、TXT、MD · 单文件不超过 16 MiB</p>
             </div>
-            <div className="benefits"><div className="benefit"><strong><Icon size={14} />保留原文</strong><p>原始内容与换行保持完整，<br />不会修改你选择的文件。</p></div><div className="benefit"><strong><Icon name="link" size={14} />按片段定位</strong><p>字幕对应真实时间，<br />文本对应原文行号。</p></div><div className="benefit"><strong><Icon name="shield" size={14} />本地处理</strong><p>导入和查看无需登录，<br />不向外部服务发送资料。</p></div></div>
           </div> : <>
             <div className="source-head"><span className="format-badge">{document.format.toUpperCase()}</span><span>{document.segments.length.toLocaleString()} 个来源片段 · {document.rawText.length.toLocaleString()} 字符 · {document.encoding.toUpperCase()}</span></div>
             <div className="view-tabs"><button className={view === 'segments' ? 'active' : ''} aria-pressed={view === 'segments'} onClick={() => setView('segments')}>来源片段</button><button className={view === 'raw' ? 'active' : ''} aria-pressed={view === 'raw'} onClick={openOriginal}>原始文本</button></div>
@@ -36,7 +37,7 @@ export function SourceWorkspace({document,importFile,busy=false}:{document?:Sour
             </>}
           </>}
         </section>
-        <aside className="inspector"><h2>来源概览</h2>{!document ? <div className="inspector-placeholder"><Icon name="layers" size={33} /><p>导入后，在这里查看<br />文件信息与原文位置。</p></div> : <>
+        <aside className="inspector"><h2>来源概览</h2>{!document ? <div className="inspector-placeholder"><Icon name="layers" size={33} /><p>打开文件后可查看格式、路径和所选片段。</p></div> : <>
           <dl><dt>来源格式</dt><dd>{document.format.toUpperCase()} · 本地文件</dd><dt>文本编码</dt><dd>{document.encoding.toUpperCase()}</dd><dt>片段数量</dt><dd>{document.segments.length.toLocaleString()} 个</dd><dt>原始位置</dt><dd className="path">{document.originalPath}</dd><dt>来源校验</dt><dd className="path" title={document.checksum}>{document.checksum.slice(0, 16)}…</dd></dl>
           <div className="inspector-divider" />
           {segment && <><h2>片段 {String(segment.order).padStart(2, '0')} · 原文依据</h2><p className="source-location" data-testid="source-location">第 {segment.range.startLine}–{segment.range.endLine} 行{segment.startMs !== undefined ? ` · ${time(segment.startMs)}` : ''}</p><pre className="excerpt">{segment.text.slice(0, 600)}</pre>{segment.text.length > 600 && <p className="preview-note">此处显示片段开头，完整内容见原始文本。</p>}<button className="original-link" onClick={openOriginal}>查看原文位置</button></>}
