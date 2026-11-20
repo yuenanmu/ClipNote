@@ -38,6 +38,26 @@ test('Markmap remains readable and split reading keeps independent view state wi
     await page.getByRole('button', { name: '选择节点 章节一', exact: true }).click();
     assert.equal(await page.getByRole('button', { name: 'Mindmap', exact: true }).getAttribute('aria-pressed'), 'true');
   });
+  await t.test('the notes canvas and controls use a rounded gradient and translucent panels', async () => {
+    const stage = page.locator('.notes-main .mindmap-stage');
+    const surface = await stage.evaluate(element => {
+      const read = node => {
+        const style = getComputedStyle(node);
+        return { gradient: style.backgroundImage, radius: parseFloat(style.borderTopLeftRadius), color: style.backgroundColor };
+      };
+      return {
+        canvas: read(element),
+        controls: read(element.querySelector('.mindmap-controls')),
+        header: read(element.closest('.reader-main').querySelector('.reader-toolbar'))
+      };
+    });
+    assert.match(surface.canvas.gradient, /gradient/);
+    for (const panel of [surface.canvas, surface.controls, surface.header]) assert.ok(panel.radius >= 12);
+    for (const panel of [surface.controls, surface.header]) {
+      const alpha = Number(panel.color.match(/^rgba\(.+, ([\d.]+)\)$/)?.[1]);
+      assert.ok(alpha > 0 && alpha < 1);
+    }
+  });
   await t.test('split mode resizes without resetting either pane and node clicks locate Markdown across pages', async () => {
     await page.getByRole('button', { name: '对照', exact: true }).click();
     const separator = page.getByRole('separator', { name: '调整 Markdown 与脑图比例' }); await separator.waitFor(); assert.equal(await ratio(), '40');
@@ -69,7 +89,11 @@ test('Markmap remains readable and split reading keeps independent view state wi
     const scale = await canvas().getAttribute('data-scale'), body = page.locator('.reader-scroll'), scroll = await body.evaluate(e => e.scrollTop);
     const box = await separator.boundingBox(); await page.mouse.move(box.x + box.width / 2, box.y + 100); await page.mouse.down(); await page.mouse.move(box.x + 100, box.y + 100); await page.mouse.up();
     assert.notEqual(await ratio(), '40'); assert.equal(await canvas().getAttribute('data-scale'), scale);
-    const afterScroll=await body.evaluate(e=>({top:e.scrollTop,max:e.scrollHeight-e.clientHeight}));assert.ok(Math.abs(afterScroll.top-Math.min(scroll,afterScroll.max))<1);
+    const afterScroll=await body.evaluate(e=>{
+      const top=e.scrollTop;e.scrollTop=e.scrollHeight;
+      const max=e.scrollTop;e.scrollTop=top;
+      return {top,max};
+    });assert.ok(Math.abs(afterScroll.top-Math.min(scroll,afterScroll.max))<1, JSON.stringify({before:scroll,after:afterScroll}));
     await separator.focus(); await page.keyboard.press('Home');
     assert.ok(await page.locator('.reader-scroll').evaluate(e => e.getBoundingClientRect().width) >= 280);
     await page.keyboard.press('End'); assert.ok(await page.locator('.mindmap-holder').evaluate(e => e.getBoundingClientRect().width) >= 280);

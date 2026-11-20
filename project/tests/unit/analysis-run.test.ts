@@ -98,3 +98,14 @@ test('generated output exceeding actual reader AST complexity fails explicitly a
   assert.throws(() => renderMarkdown(value, s), code('TOO_LARGE'));
   await assert.rejects(analyzeSource(s, profile, async () => ({ status: 'completed', value })), (e: unknown) => e instanceof AnalysisError && e.code === 'TOO_LARGE' && e.checkpoints.length === 1);
 });
+
+test('progress counts validated original chunks and starts with restored checkpoints', async () => {
+  const s = source('依据'.repeat(1400)), total = planAnalysis(s, profile).chunks.length;
+  const initial = await analyzeSource(s, profile, async r => result(r.chunk));
+  const progress: unknown[] = [];
+  await analyzeSource(s, profile, async r => r.repair ? result(r.chunk) : {status:'completed',value:'broken'}, {
+    checkpoints: initial.checkpoints.slice(0, 1), onChunkProgress: value => progress.push(value),
+  });
+  assert.ok(total > 1);
+  assert.deepEqual(progress, Array.from({length: total}, (_, i) => ({completed:i + 1,total})));
+});

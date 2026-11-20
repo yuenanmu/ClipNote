@@ -17,7 +17,7 @@ export class SmartSubTasks {
   private cache(id:string){if(!isUuid(id))throw new Error('任务标识无效。');return join(this.root,'downloads',id);}
   cacheDirectory(id:string){return this.cache(id);}
   downloadReceipt(id:string){return this.operation(id,'tasks.get');}
-  async prepare(url:string){const id=randomUUID(),cache=this.cache(id),binding=this.connect?(await this.connect()).identity:undefined;await checkedDirectory(cache,true);return this.journal.prepare(url,cache,id,binding);}
+  async prepare(url:string,id:string=randomUUID()){const cache=this.cache(id),binding=this.connect?(await this.connect()).identity:undefined;await checkedDirectory(cache,true);return this.journal.prepare(url,cache,id,binding);}
   async invokeFor(id:string,operation:string,input:unknown){
     const record=await this.journal.reopen(id);
     if(this.connect){const connection=await this.connect();if(!record.binding || record.binding!==connection.identity)throw new Error('SmartSub 安装或后台身份已变化，请切回原安装后恢复。');return connection.invoke(operation,input);}

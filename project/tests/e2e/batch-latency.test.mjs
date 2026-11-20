@@ -52,7 +52,9 @@ test('duplicate files reuse one request with live progress, independent saves an
   await panel.getByLabel('整理阶段').getByRole('status').getByText('等待首个有效输出',{exact:true}).waitFor();
   const active = panel.locator('.batch-item.running').getByLabel('整理阶段');
   await active.getByRole('progressbar').waitFor();
-  assert.equal(await active.getByRole('progressbar').getAttribute('value'), null);
+  await active.getByText('已完成 0/1 块',{exact:true}).waitFor();
+  assert.equal(await active.getByRole('progressbar').getAttribute('value'), '0');
+  assert.equal(await active.getByRole('progressbar').getAttribute('max'), '1');
   assert.equal(await active.locator('details').getAttribute('open'), null);
   await page.screenshot({path:join(base,'batch-latency-waiting.png')});
   await active.getByText('详细信息').focus();

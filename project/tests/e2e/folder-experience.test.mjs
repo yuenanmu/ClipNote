@@ -57,3 +57,32 @@ test('typing during a delayed save stays in the editor and search allows inline 
   const editor=f.page.getByRole('textbox',{name:'编辑 Markdown'});await editor.fill('# Saved snapshot');await f.page.getByRole('button',{name:'保存笔记',exact:true}).click();for(let n=0;n<50 && !await f.app.evaluate(()=>globalThis.__delayedSave);n++)await f.page.waitForTimeout(10);await editor.fill('# New typing after save');await f.page.getByRole('button',{name:'保存笔记',exact:true}).waitFor({state:'visible'});await f.page.waitForFunction(()=>!document.querySelector('.note-editor-pane .primary')?.disabled);assert.equal(await editor.inputValue(),'# New typing after save');assert.equal(readFileSync(join(notes,'sample.md'),'utf8'),'# Saved snapshot');
   await f.page.getByRole('button',{name:'阅读',exact:true}).click();await f.page.getByRole('dialog',{name:'未保存的修改'}).getByRole('button',{name:'放弃更改'}).click();await f.page.getByRole('button',{name:'搜索文件',exact:true}).click();await f.page.getByRole('textbox',{name:'搜索文件',exact:true}).fill('sample');await f.page.getByRole('tree').filter({has: f.page.getByRole('treeitem',{name:'sample.md',exact:true})}).getByText('1 项',{exact:true}).waitFor();await f.page.getByRole('button',{name:'新建笔记',exact:true}).click();const filename=f.page.getByRole('textbox',{name:'文件名称'});await filename.waitFor();await filename.fill('created.md');await filename.press('Enter');for(let n=0;n<50 && !existsSync(join(notes,'created.md'));n++)await f.page.waitForTimeout(20);assert.equal(existsSync(join(notes,'created.md')),true);
 });
+
+test('the document outline divider remembers its width independently of the file tree',{timeout:60000},async t=>{
+  const {page,app,own,pick}=await isolated(t,'outline-divider-');
+  const notes=join(own,'notes');mkdirSync(notes);writeFileSync(join(notes,'outline.md'),'# 标题\n\n## 章节\n\n合成正文');
+  await app.evaluate(({BrowserWindow})=>BrowserWindow.getAllWindows()[0].setSize(980,680));
+  await page.getByRole('button',{name:'笔记',exact:true}).click();
+  await pick(notes,'打开笔记文件夹');
+  await page.getByRole('treeitem',{name:'outline.md',exact:true}).click();
+  await page.getByRole('button',{name:'Markdown',exact:true}).click();
+  const divider=page.getByRole('separator',{name:'调整文档目录宽度'});
+  await divider.waitFor();
+  assert.equal(await divider.getAttribute('aria-valuenow'),'210');
+  await divider.press('ArrowRight');
+  assert.equal(await divider.getAttribute('aria-valuenow'),'226');
+  const box=await divider.boundingBox();
+  await page.mouse.move(box.x+3,box.y+80);await page.mouse.down();await page.mouse.move(box.x+37,box.y+80);await page.mouse.up();
+  const width=Number(await divider.getAttribute('aria-valuenow'));
+  assert.ok(width>226);
+  await page.getByRole('button',{name:'大纲',exact:true}).click();
+  assert.equal(await divider.count(),0);
+  await page.getByRole('button',{name:'大纲',exact:true}).click();
+  assert.equal(Number(await divider.getAttribute('aria-valuenow')),width);
+  await page.reload();
+  await page.getByRole('button',{name:'笔记',exact:true}).click();
+  await page.getByRole('treeitem',{name:'outline.md',exact:true}).click();
+  await page.getByRole('button',{name:'Markdown',exact:true}).click();
+  assert.equal(Number(await divider.getAttribute('aria-valuenow')),width);
+  assert.ok(await page.locator('.reader-main').evaluate(el=>el.clientWidth)>=320);
+});

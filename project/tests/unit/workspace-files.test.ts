@@ -169,3 +169,17 @@ test('opening a search hit observes its unexpanded parent for external changes',
   const f=await fixture(t);await mkdir(join(f.root,'nested'));await writeFile(join(f.root,'nested','searchable.md'),'# initial');const files=new WorkspaceFiles(f.state),root=await files.choose('notes',f.root),changes:unknown[]=[];const stop=files.subscribe(change=>changes.push(change));t.after(stop);await files.list('notes',root.id);
   const hit=(await files.search('notes','searchable')).entries[0];await files.filePath('notes',hit.id);await new Promise(resolve=>setTimeout(resolve,100));changes.length=0;await writeFile(join(f.root,'nested','searchable.md'),'# external');for(let n=0;n<30 && !changes.length;n++)await new Promise(resolve=>setTimeout(resolve,20));assert.ok(changes.length);
 });
+
+test('copies original subtitle bytes and reuses a matching numbered copy', async t => {
+  const f = await fixture(t), workspace = new WorkspaceFiles(f.state);
+  const bytes = Buffer.from('1\r\n00:00:00,000 --> 00:00:02,000\r\n原文\r\n');
+  await assert.rejects(workspace.copySubtitle('原文.srt', bytes), {code:'SOURCE_ROOT_REQUIRED'});
+  await workspace.choose('source', f.root);
+  await writeFile(join(f.root, '原文.srt'), 'already present');
+  const first = await workspace.copySubtitle('原文.srt', bytes);
+  const second = await workspace.copySubtitle('原文.srt', bytes);
+  assert.equal(first.name, '原文 (2).srt');
+  assert.equal(first.id, second.id);
+  assert.deepEqual(await readFile(join(f.root, first.name)), bytes);
+  assert.equal(await readFile(join(f.root, '原文.srt'), 'utf8'), 'already present');
+});

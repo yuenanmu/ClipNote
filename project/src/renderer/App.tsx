@@ -11,14 +11,62 @@ import {FileIcon,ToolButton} from './FileIcon.tsx';
 import {workspaceValue,unwrap} from './workspace-api.ts';
 import {ReaderView} from './features/reader/ReaderView.tsx';
 import {SettingsPanel} from './SettingsPanel.tsx';
+import type {SmartSubSource,VideoQueueAction,VideoQueueView} from '../contracts/smartsub.ts';
+import {VideoQueuePanel,queueCounts} from './VideoQueuePanel.tsx';
 import {SmartSubPanel} from './SmartSubPanel.tsx';
 declare global {interface Window {clipnote:DesktopApi}}
+const SIDEBAR_HIDDEN_KEY='clipnote.explorer.hidden';
 interface EditSession {id:string;name:string;text:string;baseText:string;checksum:string;conflict?:boolean}
 export function App(){
-  const [area,setArea]=useState<'source'|'notes'>('source'),[api,setApi]=useState(false),[settingsTab,setSettingsTab]=useState<'api'|'smartsub'>('api'),[videoVisited,setVideoVisited]=useState(false),[smartsub,setSmartsub]=useState(false),[archive,setArchive]=useState(false),[source,setSource]=useState<SourceDocument>(),[sourceId,setSourceId]=useState<string>();
+  const [area,setArea]=useState<'source'|'notes'>('source'),[api,setApi]=useState(false),[settingsTab,setSettingsTab]=useState<'api'|'smartsub'>('api'),[videoVisited,setVideoVisited]=useState(()=>{try{return Boolean(localStorage.getItem('clipnote.smartsub.task'));}catch{return false;}}),[smartsub,setSmartsub]=useState(false),[archive,setArchive]=useState(false),[source,setSource]=useState<SourceDocument>(),[sourceId,setSourceId]=useState<string>();
   const [note,setNote]=useState<ReaderDocument>(),[noteId,setNoteId]=useState<string>(),[edit,setEdit]=useState<EditSession>(),[notice,setNotice]=useState<{text:string;error?:boolean}>(),[loading,setLoading]=useState(false),[saving,setSaving]=useState(false);
   const [batchIds,setBatchIds]=useState<string[]>([]),[openRequest,setOpenRequest]=useState(0),[aiRunning,setAiRunning]=useState(false),[confirmLeave,setConfirmLeave]=useState(false);
   const [width,setWidth]=useState(()=>{try{const value=Number(window.localStorage.getItem('clipnote.explorer.width'));return value>=230 && value<=480?value:280;}catch{return 280;}});
+  const [sidebarHidden,setSidebarHidden]=useState(()=>{
+    try{return localStorage.getItem(SIDEBAR_HIDDEN_KEY)==='true';}catch{return false;}
+  });
+  const toggleSidebar=()=>{
+    const hidden=!sidebarHidden;
+    setSidebarHidden(hidden);
+    try{localStorage.setItem(SIDEBAR_HIDDEN_KEY,String(hidden));}catch{}
+  };
+  const [videoQueue,setVideoQueue]=useState<VideoQueueView>({items:[],paused:false});
+  const [queueError,setQueueError]=useState('');
+  const [showQueue,setShowQueue]=useState(false);
+  const queueRevision=useRef(0);
+  useEffect(()=>{
+    let alive=true,pending=false;
+    try{
+      const id=localStorage.getItem('clipnote.smartsub.task');
+      if(id)void window.clipnote.smartsubTrackLegacy(id,localStorage.getItem('clipnote.smartsub.transcribing')==='yes'?'transcription':'download').catch(()=>{});
+    }catch{}
+    const refresh=async()=>{
+      if(pending)return;
+      pending=true;const revision=queueRevision.current;
+      try{const state=unwrap(await window.clipnote.videoQueue({type:'state'}));if(alive&&revision===queueRevision.current){setVideoQueue(state);setQueueError('');}}
+      catch(error){if(alive)setQueueError(error instanceof Error?error.message:'无法读取视频队列。');}
+      finally{pending=false;}
+    };
+    void refresh();const timer=setInterval(()=>void refresh(),1000);
+    return()=>{alive=false;clearInterval(timer);};
+  },[]);
+  const queueAction=async(action:VideoQueueAction)=>{
+    const revision=++queueRevision.current;
+    const state=unwrap(await window.clipnote.videoQueue(action));
+    if(revision===queueRevision.current)setVideoQueue(state);
+  };
+  const openVideoSource=(value:SmartSubSource)=>{
+    setSource(value.document);setSourceId(value.entryId);setSmartSubSourceId(value.entryId);
+    setCopy(undefined);setBatchIds([value.entryId]);setArea('source');setSmartsub(false);
+  };
+  const [smartSubSourceId,setSmartSubSourceId]=useState<string>();
+  const [copy,setCopy]=useState<{sourceId:string;entry:WorkspaceEntry}>();
+  const [reveal,setReveal]=useState<{id:string}>();
+  const copySubtitle=()=>void run(async()=>{
+    if(!sourceId || !source) return;
+    const entry=unwrap(await window.clipnote.copySmartSubSource(sourceId,source.checksum));
+    setCopy({sourceId,entry});
+  });
   const savePending=useRef(false);
   const nextAction=useRef<(()=>void)|undefined>(undefined),dragging=useRef(false),readQueue=useRef<Promise<unknown>>(Promise.resolve()),request=useRef(0);
   const latest=useRef({sourceId,noteId,note,edit,area});latest.current={sourceId,noteId,note,edit,area};
@@ -45,19 +93,28 @@ export function App(){
   const changeArea=(value:'source'|'notes')=>navigate(()=>{setEdit(undefined);setApi(false);setSmartsub(false);setArea(value);setNotice(undefined);});
   const size=(value:number)=>setWidth(Math.max(230,Math.min(480,value)));
   const openSettings=(tab:'api'|'smartsub')=>navigate(()=>{setSettingsTab(tab);setApi(true);});
-  const openVideo=()=>navigate(()=>{setVideoVisited(true);setSmartsub(true);setApi(false);setArea('source');});
-  return <div className="app-shell file-shell" style={{gridTemplateColumns:`${width}px 5px minmax(0,1fr)`}}>
-    <aside className="file-sidebar"><div className="file-brand"><span><FileIcon size={23}/></span><strong>ClipNote</strong></div><nav className="file-areas" aria-label="工作区"><button aria-label="文件导入" aria-current={area==='source' && !api?'page':undefined} onClick={()=>changeArea('source')}><FileIcon name="layers"/>资料</button><button aria-current={area==='notes' && !api?'page':undefined} onClick={()=>changeArea('notes')}><FileIcon/>笔记</button><ToolButton label="设置" icon="settings" onClick={()=>openSettings('api')}/></nav>
-      <div className="file-explorer-slot" hidden={area!=='source'}><WorkspaceTree onRequestRootChange={navigate} kind="source" onOpen={openSource} onSelectionChange={entries=>setBatchIds(entries.filter(entry=>entry.kind==='file').map(entry=>entry.id))} onClear={()=>{setSource(undefined);setSourceId(undefined);setBatchIds([]);}}/></div>
+  const openVideo=(queue=false)=>navigate(()=>{setShowQueue(queue);setVideoVisited(true);setSmartsub(true);setApi(false);setArea('source');});
+  const counts=queueCounts(videoQueue);
+  const sidebarLabel=sidebarHidden?'显示侧边栏':'隐藏侧边栏';
+  return <div className="app-shell file-shell" style={{gridTemplateColumns:sidebarHidden?'48px minmax(0,1fr)':`${width}px 5px minmax(0,1fr)`}}>
+    <div className="file-sidebar-frame">
+      <button type="button" className="secondary sidebar-toggle" aria-label={sidebarLabel} title={sidebarLabel} aria-controls="file-sidebar" aria-expanded={!sidebarHidden} onClick={toggleSidebar}><FileIcon name="sidebar" size={18}/></button>
+      <aside className="file-sidebar" id="file-sidebar" hidden={sidebarHidden}><div className="file-brand"><span><FileIcon size={23}/></span><strong>ClipNote</strong></div><nav className="file-areas" aria-label="工作区"><button aria-label="文件导入" aria-current={area==='source' && !api && !smartsub?'page':undefined} onClick={()=>changeArea('source')}><FileIcon name="layers"/>资料</button><button aria-current={area==='notes' && !api?'page':undefined} onClick={()=>changeArea('notes')}><FileIcon/>笔记</button><button className="queue-nav" aria-current={smartsub&&showQueue&&!api?'page':undefined} onClick={()=>openVideo(true)}>视频队列{counts.active+counts.waiting>0 && <small>{counts.active} 进行中 · {counts.waiting} 待处理</small>}</button><ToolButton label="设置" icon="settings" onClick={()=>openSettings('api')}/></nav>
+      <div className="file-explorer-slot" hidden={area!=='source'}><WorkspaceTree reveal={reveal} onRequestRootChange={navigate} kind="source" onOpen={openSource} onSelectionChange={entries=>setBatchIds(entries.filter(entry=>entry.kind==='file').map(entry=>entry.id))} onClear={()=>{setReveal(undefined);setCopy(undefined);if(sourceId!==smartSubSourceId || !smartSubSourceId){setSource(undefined);setSourceId(undefined);setBatchIds([]);}}}/></div>
       <div className="file-explorer-slot" hidden={area!=='notes'}><WorkspaceTree onRequestRootChange={navigate} kind="notes" onOpen={entry=>openNote(entry)} onEdit={entry=>openNote(entry,true)} onClear={()=>{setNote(undefined);setNoteId(undefined);setEdit(undefined);}}/></div>
       <footer className="file-sidebar-bottom"><span><i/>本地文件</span><button onClick={()=>navigate(()=>setArchive(true))}><FileIcon name="archive"/>旧归档</button></footer>
-    </aside>
-    <div className="file-sidebar-divider" role="separator" aria-label="调整文件侧栏宽度" aria-orientation="vertical" aria-valuemin={230} aria-valuemax={480} aria-valuenow={width} tabIndex={0} onPointerDown={event=>{dragging.current=true;event.currentTarget.setPointerCapture(event.pointerId);}} onPointerMove={event=>{if(dragging.current)size(event.clientX);}} onPointerUp={event=>{dragging.current=false;if(event.currentTarget.hasPointerCapture(event.pointerId))event.currentTarget.releasePointerCapture(event.pointerId);try{window.localStorage.setItem('clipnote.explorer.width',String(width));}catch{}}} onPointerCancel={()=>{dragging.current=false;}} onKeyDown={event=>{if(event.key==='ArrowLeft' || event.key==='ArrowRight'){event.preventDefault();size(width+(event.key==='ArrowLeft'?-16:16));}}}/>
+      </aside>
+    </div>
+    <div className="file-sidebar-divider" hidden={sidebarHidden} role="separator" aria-label="调整文件侧栏宽度" aria-orientation="vertical" aria-valuemin={230} aria-valuemax={480} aria-valuenow={width} tabIndex={0} onPointerDown={event=>{dragging.current=true;event.currentTarget.setPointerCapture(event.pointerId);}} onPointerMove={event=>{if(dragging.current)size(event.clientX);}} onPointerUp={event=>{dragging.current=false;if(event.currentTarget.hasPointerCapture(event.pointerId))event.currentTarget.releasePointerCapture(event.pointerId);try{window.localStorage.setItem('clipnote.explorer.width',String(width));}catch{}}} onPointerCancel={()=>{dragging.current=false;}} onKeyDown={event=>{if(event.key==='ArrowLeft' || event.key==='ArrowRight'){event.preventDefault();size(width+(event.key==='ArrowLeft'?-16:16));}}}/>
     <div className="file-content">
       {api && <SettingsPanel initialTab={settingsTab} onBack={()=>setApi(false)}/>}
-      {videoVisited && <div className="video-slot" hidden={!smartsub || api}><SmartSubPanel active={smartsub && !api} onSettings={()=>openSettings('smartsub')} onBack={()=>setSmartsub(false)} onSource={value=>{setSource(value.document);setSourceId(value.entryId);setBatchIds([value.entryId]);setArea('source');setSmartsub(false);}}/></div>}
-      <main className="desktop source-desktop" hidden={area!=='source' || smartsub || api} aria-busy={loading}><header className="toolbar"><div><p className="eyebrow">资料 / 本地文件</p><h1 title={source?.fileName}>{source?.fileName??'文件导入'}</h1><p className="toolbar-caption">打开真实文件，按主题组织资料。</p></div><div className="toolbar-actions"><button className="secondary" onClick={openVideo}>视频链接</button>{source?.format==='md' && <button className="secondary" onClick={readSourceMarkdown}>阅读 Markdown</button>}<button className="secondary" disabled={!sourceId || aiRunning} onClick={()=>{if(batchIds.length<2 && sourceId)setBatchIds([sourceId]);setOpenRequest(value=>value+1);}}>AI 整理</button><button className="primary" onClick={()=>navigate(()=>void importFile())}><FileIcon name="folderOpen"/>打开文件</button></div></header>
-        <BatchPanel ids={batchIds} instructions={(()=>{try{return window.localStorage.getItem('clipnote.analysis.instructions')??'';}catch{return '';}})()} onBusy={setAiRunning} openRequest={openRequest}/>
+      {videoVisited && <div className="video-slot" hidden={!smartsub || api}>
+        <div className="video-view" hidden={!showQueue}><VideoQueuePanel queue={videoQueue} error={queueError} onAction={queueAction} onSettings={()=>openSettings('smartsub')} onSingle={()=>openVideo()} onSource={openVideoSource}/></div>
+        <div className="video-view" hidden={showQueue}><SmartSubPanel active={smartsub && !api && !showQueue} onSettings={()=>openSettings('smartsub')} onBack={()=>setSmartsub(false)} onSource={openVideoSource}/></div>
+      </div>}
+      <main className="desktop source-desktop" hidden={area!=='source' || smartsub || api} aria-busy={loading}><header className="toolbar"><div><p className="eyebrow">资料 / 本地文件</p><h1 title={source?.fileName}>{source?.fileName??'文件导入'}</h1></div><div className="toolbar-actions"><button className="secondary" onClick={()=>openVideo()}>视频链接</button>{source?.format==='md' && <button className="secondary" onClick={readSourceMarkdown}>阅读 Markdown</button>}<button className="secondary" disabled={!sourceId || aiRunning} onClick={()=>{if(batchIds.length<2 && sourceId)setBatchIds([sourceId]);setOpenRequest(value=>value+1);}}>AI 整理</button>{sourceId && sourceId===smartSubSourceId && <button className="secondary" disabled={loading} onClick={copySubtitle}>复制到资料</button>}<button className="primary" onClick={()=>navigate(()=>void importFile())}><FileIcon name="folderOpen"/>打开文件</button></div></header>
+        <BatchPanel noticeCount={Number(Boolean(notice))+Number(Boolean(copy && copy.sourceId===sourceId))} active={area==='source' && !smartsub && !api} ids={batchIds} onBusy={setAiRunning} openRequest={openRequest}/>
+        {copy && copy.sourceId===sourceId && <div className="notice" role="status">已复制到资料：{copy.entry.name} <button className="quiet" onClick={()=>setReveal({id:copy.entry.id})}>在资料中定位</button></div>}
         {area==='source' && notice && <div className={`notice ${notice.error?'error':''}`} role={notice.error?'alert':'status'}>{notice.text}</div>}<SourceWorkspace document={source} importFile={importFile} busy={loading}/>
       </main>
       <section className="notes-main" hidden={area!=='notes' || api || smartsub}>

@@ -145,3 +145,7 @@ B 电脑的实际安装位置保存在已忽略的 `../.local/smartsub.env`，�
 后续真实任务、查询/取消及字幕读取契约见 `../docs/T02接入契约.md`。没有安装时仅记录未运行，不自动获取 SmartSub、引擎或模型。
 
 权威任务进度、验证时间/版本和未测影响统一见 `../docs/任务清单.md`，本文件不维护另一套完成状态。
+
+## 构建 Windows x64 便携发布包
+
+从干净提交进入 `project/`，确保可以运行 `windres`、`gcc` 和 Python。运行 `npm.cmd run package:windows`，然后运行 `python tools/archive-candidate.py --release ../.local/releases/ClipNote-win-x64-0.3.0`。发布目录和 ZIP 均写入已忽略的 `.local/releases/`，压缩步骤同时生成 `.zip.sha256`。包内的 `build-info.json` 记录源码提交及可执行文件校验值。打包窗口测试使用 ZIP 解压后的独立测试副本。

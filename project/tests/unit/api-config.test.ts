@@ -45,3 +45,36 @@ test('API IPC requires trusted caller, validates argument count, and only return
   assert.equal((await handlers.test('trusted', 'unexpected')).status, 'error'); assert.equal(invoked, 0);
   const result = await handlers.save('trusted', config); assert.equal(result.status, 'error'); assert.ok(!JSON.stringify(result).includes(secret));
 });
+
+test('a legacy profile retains its key and a default switch cannot change a confirmed profile', async t => {
+  const dir=await fixture(t);
+  const {apiKey,...legacy}=config;
+  const encryptedKey=(await protector.encryptStringAsync(apiKey)).toString('base64');
+  await writeFile(join(dir,'api.json'),JSON.stringify({version:1,...legacy,encryptedKey}));
+  const store=new ApiConfigStore(dir,protector);
+  const [first]=(await store.profiles()).profiles;
+  const second=await store.saveProfile({name:'Other account', ...config, apiKey:'synthetic-other-key'});
+  await store.setDefault(second.id);
+  const restarted=new ApiConfigStore(dir,protector);
+  assert.equal((await restarted.profiles()).defaultId,second.id);
+  assert.equal((await restarted.credentials()).apiKey,'synthetic-other-key');
+  assert.equal((await restarted.credentials(first)).apiKey,apiKey);
+  await restarted.saveProfile({id:first.id,revision:first.revision,name:first.name,...config,apiKey:'synthetic-new-key'});
+  await assert.rejects(restarted.credentials(first),isCode('INVALID_CONFIG'));
+  assert.equal((await restarted.credentials()).apiKey,'synthetic-other-key');
+});
+
+test('migration preserves a stored endpoint while other profiles are saved',async t=>{
+  const dir=await fixture(t),store=new ApiConfigStore(dir,protector);
+  const {apiKey,...legacy}=config;
+  const baseUrl=legacy.baseUrl+'///';
+  const encryptedKey=(await protector.encryptStringAsync(apiKey)).toString('base64');
+  await writeFile(join(dir,'api.json'),JSON.stringify({...legacy,baseUrl,version:1,encryptedKey}));
+  const initial=(await store.profiles()).profiles[0];
+  assert.equal(initial.baseUrl,baseUrl);
+  await store.saveProfile({...config,name:'第二套'});
+  assert.equal((await store.credentials({id:initial.id,revision:initial.revision})).baseUrl,baseUrl);
+  const updated=await store.saveProfile({...initial,name:'新名称',apiKey:''});
+  assert.equal(updated.revision,initial.revision);
+  assert.equal(updated.baseUrl,baseUrl);
+});

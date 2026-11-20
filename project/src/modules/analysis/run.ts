@@ -77,11 +77,13 @@ export async function analyzeSource(source: SourceDocument, profile: AnalysisPro
       if (!cp || Object.keys(cp).length !== 3 || cp.planId !== plan.planId || !chunk || completed.has(cp.chunkId)) throw new AnalysisError('INVALID_CHECKPOINT');
       try { completed.set(cp.chunkId, { planId: plan.planId, chunkId: chunk.chunkId, outline: validateOutline(output(cp.outline), snapshot, chunk) }); } catch { throw new AnalysisError('INVALID_CHECKPOINT'); }
     }
+    const report = () => options.onChunkProgress?.({ completed: completed.size, total: plan.chunks.length });
+    report();
     for (const chunk of plan.chunks) {
       cancelled(); if (completed.has(chunk.chunkId)) continue;
       const outline = await analyzeChunk(chunk, 0);
       const cp = { planId: plan.planId, chunkId: chunk.chunkId, outline }; completed.set(chunk.chunkId, cp);
-      await options.onCheckpoint?.(structuredClone(cp)); cancelled();
+      await options.onCheckpoint?.(structuredClone(cp)); report(); cancelled();
     }
     const all = checkpoints(); const outline = validateOutline(mergeOutlines(all.map(cp => cp.outline)), snapshot); const markdown = renderMarkdown(outline, snapshot); cancelled();
     const refs = new Set<string>();

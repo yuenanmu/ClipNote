@@ -1,7 +1,7 @@
 101 ICON "clipnote.ico"
 1 VERSIONINFO
-FILEVERSION 0,1,0,0
-PRODUCTVERSION 0,1,0,0
+FILEVERSION 0,3,0,0
+PRODUCTVERSION 0,3,0,0
 FILEFLAGSMASK 0x3fL
 FILEFLAGS 0x0L
 FILEOS 0x40004L
@@ -12,12 +12,12 @@ BEGIN
   BLOCK "040904B0"
   BEGIN
    VALUE "CompanyName", "ClipNote\0"
-   VALUE "FileDescription", "ClipNote Windows candidate\0"
-   VALUE "FileVersion", "0.1.0.0\0"
+   VALUE "FileDescription", "ClipNote\0"
+   VALUE "FileVersion", "0.3.0.0\0"
    VALUE "InternalName", "ClipNote\0"
    VALUE "OriginalFilename", "ClipNote.exe\0"
    VALUE "ProductName", "ClipNote\0"
-   VALUE "ProductVersion", "0.1.0-candidate\0"
+   VALUE "ProductVersion", "0.3.0\0"
   END
  END
  BLOCK "VarFileInfo"

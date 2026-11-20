@@ -1,3 +1,5 @@
+import type { AnalysisChunkProgress } from './analysis.ts';
+
 /** Content-free diagnostics exposed to the desktop renderer. */
 export type DiagnosticPhase = 'preparing' | 'request' | 'headers' | 'first_text' | 'last_text' | 'received' | 'validating' | 'staging' | 'awaiting_save' | 'saving' | 'saved';
 export type DiagnosticTerminal = 'succeeded' | 'failed' | 'cancelled';
@@ -8,6 +10,7 @@ export interface OrganizationTaskSnapshot {
   revision: number;
   elapsedMs?: number;
   requests: number;
+  chunkProgress?: AnalysisChunkProgress;
   chunk?: {index:number; total?:number};
   service: 'api' | 'subscription';
   status: 'running' | 'awaiting_save' | DiagnosticTerminal;

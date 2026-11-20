@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 import type { MindmapNode, ReaderDocument, ReaderHeading, ReaderLink, ReaderPosition } from '../../../contracts/reader.ts';
 import { MarkdownBody } from './MarkdownBody.tsx';
@@ -6,6 +6,7 @@ import { MindmapView } from './MindmapView.tsx';
 import { boundSplitRatio, readSplitRatio, SPLIT_PREFERENCE } from './split-preference.ts';
 import './reader.css';
 const PAGE_SIZE = 100;
+const OUTLINE_WIDTH = 'clipnote.reader.outline.width';
 type ReadingMode = 'markdown' | 'mindmap' | 'split';
 export function ReaderView({ document: note, navigation, busy, notice, onOpen, onBack, onRefresh, onExternal, onExternalLink,embedded=false,onEdit }: {
   embedded?:boolean;onEdit?():void;
@@ -18,6 +19,15 @@ export function ReaderView({ document: note, navigation, busy, notice, onOpen, o
   const [mode, setMode] = useState<ReadingMode>('mindmap'), [sidebar, setSidebar] = useState<'notes' | 'outline'>('notes');
   const [navHidden, setNavHidden] = useState(embedded), [paneWidth, setPaneWidth] = useState(1000);
   const [ratio, setRatio] = useState(() => { try { return readSplitRatio(window.localStorage); } catch { return .4; } });
+  const [outlinePreference, setOutlinePreference] = useState(() => {
+    try { return Number(window.localStorage.getItem(OUTLINE_WIDTH)) || 210; } catch { return 210; }
+  });
+  const [readerWidth, setReaderWidth] = useState(1000);
+  const shell = useRef<HTMLDivElement>(null);
+  const outlinePointer = useRef<number | null>(null);
+  const maxOutline = Math.max(144, Math.min(440, Math.floor(readerWidth - 326)));
+  const boundOutline = (width: number) => Math.max(144, Math.min(maxOutline, width));
+  const outlineWidth = boundOutline(outlinePreference);
   const scroll = useRef<HTMLDivElement>(null), panes = useRef<HTMLDivElement>(null), dragging = useRef(false);
   useEffect(() => { setMode('mindmap'); setSidebar('notes');if(embedded)setNavHidden(true); }, [note.readerId]);
   useEffect(() => { setPage(0); setActive(undefined); setCollapsed(new Set()); setTarget(undefined); setMapFocus(undefined); if (scroll.current) scroll.current.scrollTop = 0; }, [note.readerId, note.checksum]);
@@ -30,6 +40,13 @@ export function ReaderView({ document: note, navigation, busy, notice, onOpen, o
     const observer = new ResizeObserver(entries => { if (entries[0].contentRect.width) setPaneWidth(entries[0].contentRect.width); });
     observer.observe(panes.current!); return () => observer.disconnect();
   }, []);
+  useEffect(() => {
+    if (!embedded || !shell.current) return;
+    const observer = new ResizeObserver(([entry]) => { if (entry.contentRect.width) setReaderWidth(entry.contentRect.width); });
+    observer.observe(shell.current);
+    return () => observer.disconnect();
+  }, [embedded]);
+  useEffect(() => { try { window.localStorage.setItem(OUTLINE_WIDTH, String(outlinePreference)); } catch {} }, [outlinePreference]);
   useEffect(() => { try { window.localStorage.setItem(SPLIT_PREFERENCE, String(ratio)); } catch { /* Reading works when preference storage is unavailable. */ } }, [ratio]);
   const split = boundSplitRatio(ratio, paneWidth);
   const chooseMode = (next: ReadingMode) => { setMode(next); if (next === 'markdown') {setSidebar('outline');if(embedded)setNavHidden(false);} };
@@ -51,14 +68,38 @@ export function ReaderView({ document: note, navigation, busy, notice, onOpen, o
   </li>)}</ul>;
   const pages = Math.max(1, Math.ceil(note.content.root.children.length / PAGE_SIZE));
   const changePage = (next: number) => { setPage(next); setTarget(undefined); if (scroll.current) scroll.current.scrollTop = 0; };
-  const moveDivider = (clientX: number) => { const rect = panes.current!.getBoundingClientRect(); setRatio(boundSplitRatio((clientX - rect.left - 4) / (rect.width - 8), rect.width)); };
-  return <div className={`reader-shell ${embedded?'reader-embedded':''} ${navHidden ? 'nav-collapsed' : ''}`}>
+  const splitScroll = useRef<number | undefined>(undefined);
+  const resizeSplit = (next: number) => {
+    if (next === ratio) return;
+    splitScroll.current = scroll.current?.scrollTop;
+    setRatio(next);
+  };
+  useLayoutEffect(() => {
+    if (scroll.current && splitScroll.current !== undefined) {
+      scroll.current.scrollTop = splitScroll.current;
+      splitScroll.current = undefined;
+    }
+  }, [ratio]);
+  const moveDivider = (clientX: number) => {
+    const rect = panes.current!.getBoundingClientRect();
+    resizeSplit(boundSplitRatio((clientX - rect.left - 4) / (rect.width - 8), rect.width));
+  };
+  return <div ref={shell} style={embedded && !navHidden ? {gridTemplateColumns: `${outlineWidth}px 6px minmax(0,1fr)`} : undefined} className={`reader-shell ${embedded?'reader-embedded':''} ${navHidden ? 'nav-collapsed' : ''}`}>
     <aside className="reader-outline" id="reader-navigation" hidden={navHidden}>
       {!embedded && <><div className="reader-brand">ClipNote<span>笔记与思路</span></div><button className="reader-back" aria-label="返回文件工作台" disabled={busy} onClick={onBack}>← 返回文件工作台</button><div className="reader-nav-tabs"><button aria-pressed={sidebar === 'notes'} onClick={() => setSidebar('notes')}>笔记</button><button aria-pressed={sidebar === 'outline'} onClick={() => setSidebar('outline')}>大纲</button></div><div className="reader-note-list" hidden={sidebar !== 'notes'}>{navigation}</div></>}
       <div className="outline-heading" hidden={!embedded && sidebar !== 'outline'}>文档目录 <span>只读</span></div>
       <nav aria-label="Markdown 标题目录" hidden={!embedded && sidebar !== 'outline'}>{note.content.headings.length ? tree(note.content.headings) : <p className="outline-empty">本文没有标题，可直接阅读正文与脑图。</p>}</nav>
       <p className="reader-offline"><i />本地阅读 · 无需登录</p>
     </aside>
+    {embedded && !navHidden && <div role="separator" aria-label="调整文档目录宽度" aria-orientation="vertical"
+      aria-valuemin={144} aria-valuemax={maxOutline} aria-valuenow={outlineWidth} tabIndex={0} className="outline-divider"
+      onPointerDown={event => { if (event.button !== 0) return; outlinePointer.current = event.pointerId; event.currentTarget.setPointerCapture(event.pointerId); }}
+      onPointerMove={event => { if (outlinePointer.current === event.pointerId && shell.current) setOutlinePreference(boundOutline(Math.round(event.clientX - shell.current.getBoundingClientRect().left - 3))); }}
+      onLostPointerCapture={() => { outlinePointer.current = null; }}
+      onKeyDown={event => {
+        const target = {ArrowLeft: outlineWidth-16, ArrowRight: outlineWidth+16, Home:144, End:maxOutline}[event.key];
+        if (target !== undefined) { event.preventDefault(); setOutlinePreference(boundOutline(target)); }
+      }} />}
     <main className="reader-main" aria-busy={busy}>
       <header className="reader-toolbar"><div><p className="eyebrow">{note.archive ? '笔记 / 归档版本' : '笔记 / 本地文件'}</p><h1 title={note.fileName}>{note.fileName}</h1><p className="reader-file-path" title={note.filePath}>{note.filePath}</p></div><div className="reader-actions">{onEdit && <button className="secondary" onClick={onEdit}>编辑笔记</button>}<button className="secondary" disabled={busy} onClick={onOpen}>添加 Markdown</button><button className="secondary" disabled={busy} onClick={onRefresh}>刷新文件</button><button className="secondary" disabled={busy} onClick={onExternal}>外部打开</button></div></header>
       <div className="reader-view-switch" aria-label="笔记观看模式"><button aria-label={embedded?'大纲':navHidden ? '展开导航' : '收起导航'} aria-expanded={!navHidden} aria-controls="reader-navigation" onClick={() => setNavHidden(old => !old)}>{navHidden ? '☷' : '⇤'}</button><button aria-pressed={mode === 'markdown'} onClick={() => chooseMode('markdown')}>Markdown</button><button aria-pressed={mode === 'mindmap'} onClick={() => chooseMode('mindmap')}>Mindmap</button><button aria-pressed={mode === 'split'} onClick={() => chooseMode('split')}>对照</button><span>{mode === 'split' ? '拖动中线调整比例 · 点击节点定位原文' : mode === 'mindmap' ? '按章节展开 · 文字直接阅读' : '阅读原文 · 大纲可折叠定位'}</span></div>
@@ -74,8 +115,8 @@ export function ReaderView({ document: note, navigation, busy, notice, onOpen, o
           onPointerDown={event => { event.preventDefault(); dragging.current = true; event.currentTarget.setPointerCapture(event.pointerId); }}
           onPointerMove={event => { if (dragging.current) moveDivider(event.clientX); }}
           onPointerUp={event => { dragging.current = false; if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId); }}
-          onPointerCancel={() => { dragging.current = false; }} onDoubleClick={() => setRatio(.4)}
-          onKeyDown={event => { const step = event.shiftKey ? .1 : .02; if (['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) { event.preventDefault(); setRatio(boundSplitRatio(event.key === 'Home' ? 0 : event.key === 'End' ? 1 : split + (event.key === 'ArrowLeft' ? -step : step), paneWidth)); } }}><span /></div>
+          onPointerCancel={() => { dragging.current = false; }} onDoubleClick={() => resizeSplit(.4)}
+          onKeyDown={event => { const step = event.shiftKey ? .1 : .02; if (['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) { event.preventDefault(); resizeSplit(boundSplitRatio(event.key === 'Home' ? 0 : event.key === 'End' ? 1 : split + (event.key === 'ArrowLeft' ? -step : step), paneWidth)); } }}><span /></div>
         <div className="mindmap-holder" hidden={mode === 'markdown'}><MindmapView key={`${note.readerId}:${note.checksum}`} document={note} visible={mode !== 'markdown'} selectedId={active} focus={mapFocus} onSelect={selectNode} onJump={viewOriginal} /></div>
       </div>
       <footer className="reader-footer"><span>{note.encoding.toUpperCase()} · 本地阅读</span><span>外部修改后点击刷新 · 图片不自动加载</span></footer>

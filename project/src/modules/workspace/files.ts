@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
-import { watch, type FSWatcher } from 'node:fs';
-import { lstat, mkdir, readdir, rename, unlink } from 'node:fs/promises';
+import { constants, watch, type FSWatcher } from 'node:fs';
+import { copyFile, link, lstat, mkdir, readdir, rename, unlink } from 'node:fs/promises';
 import { basename, dirname, extname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { checkedDirectory, digest, exists, isUuid, readBytes, readJson, writeAtomic, writeNew } from '../storage/io.ts';
 
@@ -41,6 +41,46 @@ export class WorkspaceFiles {
     const absolute=resolve(path); if (!['.txt','.md','.srt','.vtt'].includes(extname(absolute).toLowerCase())) throw new WorkspaceError('INVALID_REQUEST'); await readBytes(absolute);
     const root=(await this.settingsData()).source; if (root && this.inside(root,absolute)) return this.remember('source',absolute,false);
     const entry=this.remember('source',absolute,false); this.entries.get(entry.id)!.external=true;this.observe('source',absolute); return entry;
+  }
+  async copySubtitle(name: string, bytes: Uint8Array): Promise<WorkspaceEntry> {
+    const root = await this.root('source');
+    if (!root) throw new WorkspaceError('SOURCE_ROOT_REQUIRED');
+    const extension = extname(name);
+    if (!['.srt','.vtt','.txt'].includes(extension.toLowerCase())) throw new WorkspaceError('INVALID_NAME');
+    const proposed = basename(name, extension).slice(0, 160);
+    const stem = validName(proposed) ? proposed : '字幕原文';
+    const temporary=join(root.path,`.clipnote-${randomUUID()}.tmp`);
+    try {
+      await writeNew(temporary,bytes);
+      for (let number = 1; number <= 10000; number++) {
+        const path = join(root.path, (number === 1 ? stem : `${stem} (${number})`) + extension);
+        try {
+          this.mutable(path);
+          try { await link(temporary,path); }
+          catch(error) {
+            if (!['EPERM','ENOTSUP','EOPNOTSUPP','ENOSYS','EINVAL'].includes((error as NodeJS.ErrnoException).code??'')) throw error;
+            await copyFile(temporary,path,constants.COPYFILE_EXCL);
+          }
+          this.notify('source');
+          return this.remember('source', path, false);
+        } catch (error) {
+          if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
+          const stat = await lstat(path).catch(error => {
+            if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+          });
+          if (stat?.isFile() && !stat.isSymbolicLink() && stat.size === bytes.length &&
+              (await readBytes(path)).equals(bytes)) {
+            const names=await readdir(root.path);
+            const candidate=basename(path);
+            const actual=names.includes(candidate)?candidate:names.find(name=>this.key(name)===this.key(candidate));
+            if(actual)return this.remember('source',join(root.path,actual),false);
+          }
+        }
+      }
+      throw new WorkspaceError('CONFLICT');
+    } finally {
+      await unlink(temporary).catch(error=>{if((error as NodeJS.ErrnoException).code!=='ENOENT')throw error;});
+    }
   }
   private async associations(): Promise<Association[]> {
     if (!await exists(this.linksPath)) return []; const data = await readJson(this.linksPath);

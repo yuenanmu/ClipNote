@@ -2,7 +2,7 @@ import { createOrganizationTasks } from './organization-tasks.ts';
 import { app, BrowserWindow, dialog, ipcMain, shell, safeStorage, session } from 'electron';
 import type { IpcMainInvokeEvent } from 'electron';
 import { mkdirSync } from 'node:fs';
-import { join, resolve, sep } from 'node:path';
+import { basename, join, resolve, sep } from 'node:path';
 import { desktopDataPath } from './data-path.ts';
 import { createImportHandler } from './import-controller.ts';
 import { createStorageHandlers } from './storage-controller.ts';
@@ -20,11 +20,14 @@ import { createBatchHandlers } from './batch-controller.ts';
 import { createSmartSubDiscoveryHandlers } from './smartsub-controller.ts';
 import { createSmartSubTaskHandlers } from './smartsub-task-controller.ts';
 import { findSmartSub,invokeSmartSub } from '../modules/smartsub/cli.ts';
+import { VideoQueue } from '../modules/smartsub/video-queue.ts';
+import { inspectTranscription } from '../modules/smartsub/transcription.ts';
+import type { VideoQueueAction } from '../contracts/smartsub.ts';
 import { SmartSubTasks } from '../modules/smartsub/tasks.ts';
 import { inspectSmartSub } from '../modules/smartsub/readiness.ts';
 import {SmartSubPreferences} from '../modules/smartsub/preferences.ts';
 import {createSmartSubPreferencesHandlers} from './smartsub-preferences-controller.ts';
-import { TranscriptionTasks } from '../modules/smartsub/transcription-tasks.ts';
+import { TranscriptionOutputError, TranscriptionTasks } from '../modules/smartsub/transcription-tasks.ts';
 import { BatchReuse } from '../modules/api/batch-reuse.ts';
 import { WorkspaceFiles } from '../modules/workspace/files.ts';
 import { WorkspaceError } from '../modules/workspace/files.ts';
@@ -36,6 +39,7 @@ import { ApiConfigStore, normalizeBaseUrl } from '../modules/api/config.ts';
 import { listModels, resolveModelKey } from '../modules/api/models.ts';
 import { createApiAdapter } from '../modules/api/provider.ts';
 import { ApiError } from '../modules/api/errors.ts';
+import { SourceImportError } from '../modules/source/errors.ts';
 import { parseSource } from '../modules/source/parser.ts';
 import { planAnalysis } from '../modules/analysis/plan.ts';
 import { validateOutline } from '../modules/analysis/validate.ts';
@@ -170,26 +174,141 @@ app.whenReady().then(() => {
   const preferenceHandlers=createSmartSubPreferencesHandlers(trusted,smartsubPreferences);
   for(const [action,handler] of Object.entries(preferenceHandlers))ipcMain.handle(`smartsub-preferences:${action}`,handler);
   const transcriptions=new TranscriptionTasks(join(local,'smartsub'),smartsubInvoke,id=>smartsubTasks.downloadReceipt(id),id=>smartsubTasks.cacheDirectory(id),(id,operation,input)=>smartsubTasks.invokeFor(id,operation,input),()=>smartsubPreferences.selection());
+  const checkDownloader = async () => {
+    const ready=await inspectSmartSub(smartsubInvoke);
+    if(!ready.compatible)throw new Error('当前 SmartSub 版本缺少所需任务接口。');
+    if(!ready.downloaders.length)throw new Error('缺少视频下载组件，请在 SmartSub 中安装后重试。');
+  };
+  const videoQueue = new VideoQueue(join(local,'smartsub','video-queue.json'), {
+    encrypt:async link=>{
+      if (!await safeStorage.isAsyncEncryptionAvailable()) throw new Error('本机加密不可用，无法保存视频链接。');
+      return (await safeStorage.encryptStringAsync(link)).toString('base64');
+    },
+    decrypt:async value=>(await safeStorage.decryptStringAsync(Buffer.from(value,'base64'))).result,
+    prepare:async(id,url)=>{await checkDownloader();await smartsubTasks.prepare(url,id);},
+    download:(id,url)=>smartsubTasks.submit(id,url),
+    downloadStatus:id=>smartsubTasks.refresh(id),
+    cancelDownload:id=>smartsubTasks.cancel(id),
+    selection:async()=>{
+      const configured=await smartsubPreferences.selection();
+      if(configured) return configured;
+      const ready=await inspectTranscription(smartsubInvoke).catch(()=>undefined);
+      return ready?.ready ? {engine:ready.engine,model:ready.model} : undefined;
+    },
+    transcriptionReady:id=>transcriptions.preview(id),
+    transcribe:(id,{engine,model},attemptId,retry)=>retry
+      ? transcriptions.retry(id,engine,model,attemptId)
+      : transcriptions.submit(id,engine,model,attemptId),
+    transcriptionStatus:(id,attemptId)=>transcriptions.refresh(id,attemptId),
+    cancelTranscription:id=>transcriptions.cancel(id),
+  });
+  const legacyRuns = new Map<string,'download'|'transcription'>();
+  const legacyForgotten=new Set<string>();
+  let videoMode:Promise<unknown>=Promise.resolve();
+  const withVideoMode=<T,>(run:()=>Promise<T>)=>{
+    const work=videoMode.then(run);
+    videoMode=work.catch(()=>{});
+    return work;
+  };
+  const legacyStart=async<T extends {status:string}>(id:string,phase:'download'|'transcription',run:()=>Promise<T>)=>{
+    await withVideoMode(async()=>{
+      if (await videoQueue.occupiesSlots()) throw new Error('视频队列正在使用 SmartSub，请等当前任务完成。');
+      legacyForgotten.delete(id);legacyRuns.set(id,phase);
+    });
+    return legacyResult(id,phase,await run());
+  };
+  const legacyResult=<T extends {status:string}>(id:string,phase:'download'|'transcription',value:T)=>{
+    if (['completed','failed','cancelled','interrupted'].includes(value.status)) {
+      if(legacyRuns.get(id)===phase) legacyRuns.delete(id);
+    } else if(!legacyForgotten.has(id)) legacyRuns.set(id,phase);
+    return value;
+  };
+  const smartsubSources = new Set<string>();
+  const useSmartSubSource = async (snapshot: SourceSnapshot) => {
+    const entry = await workspace.registerSource(snapshot.document.originalPath);
+    smartsubSources.add(entry.id);
+    return { document: remember(snapshot), entryId: entry.id };
+  };
   const smartsubTaskHandlers=createSmartSubTaskHandlers({isTrustedSender:trusted,
     readiness:()=>inspectSmartSub(smartsubInvoke),
-    prepare:async url=>({requestId:(await smartsubTasks.prepare(url)).requestId}),submit:async(id,url)=>{const ready=await inspectSmartSub(smartsubInvoke);if(!ready.compatible)throw new Error('当前 SmartSub 版本缺少所需任务接口。');if(!ready.downloaders.length)throw new Error('缺少视频下载组件，请在 SmartSub 中安装后重试。');return smartsubTasks.submit(id,url);},
-    refresh:id=>smartsubTasks.refresh(id),cancel:id=>smartsubTasks.cancel(id),
-    importSubtitle:async(id,index)=>{const snapshot=await smartsubTasks.subtitle(id,index),entry=await workspace.registerSource(snapshot.document.originalPath);return {document:remember(snapshot),entryId:entry.id};},
-    transcriptionReady:id=>transcriptions.preview(id),transcribe:(id,engine,model)=>transcriptions.submit(id,engine,model),transcriptionRetry:(id,engine,model)=>transcriptions.retry(id,engine,model),transcriptionRefresh:id=>transcriptions.refresh(id),transcriptionCancel:id=>transcriptions.cancel(id),
-    transcriptionImport:async(id,index)=>{const snapshot=await transcriptions.subtitle(id,index),entry=await workspace.registerSource(snapshot.document.originalPath);return {document:remember(snapshot),entryId:entry.id};},
+    prepare:async url=>({requestId:(await smartsubTasks.prepare(url)).requestId}),submit:async(id,url)=>{await checkDownloader();return legacyStart(id,'download',()=>smartsubTasks.submit(id,url));},
+    refresh:async id=>legacyResult(id,'download',await smartsubTasks.refresh(id)),cancel:async id=>legacyResult(id,'download',await smartsubTasks.cancel(id)),
+    importSubtitle:async(id,index)=>useSmartSubSource(await smartsubTasks.subtitle(id,index)),
+    transcriptionReady:id=>transcriptions.preview(id),transcribe:(id,engine,model)=>legacyStart(id,'transcription',()=>transcriptions.submit(id,engine,model)),transcriptionRetry:(id,engine,model)=>legacyStart(id,'transcription',()=>transcriptions.retry(id,engine,model)),transcriptionRefresh:async id=>legacyResult(id,'transcription',await transcriptions.refresh(id)),transcriptionCancel:async id=>legacyResult(id,'transcription',await transcriptions.cancel(id)),
+    transcriptionImport:async(id,index)=>useSmartSubSource(await transcriptions.subtitle(id,index)),
   });
   for(const [action,handler] of Object.entries(smartsubTaskHandlers))ipcMain.handle(`smartsub-task:${action}`,handler);
+  const videoResult=async<T>(event:unknown,work:()=>Promise<T>)=>{
+    if(!trusted(event as IpcMainInvokeEvent)) return {status:'error',error:{code:'VIDEO_QUEUE',message:'视频队列请求无效。'}};
+    try {return {status:'ok',value:await work()};}
+    catch(error) {
+      if(error instanceof SourceImportError) return {status:'error',error:{code:error.code,message:error.message}};
+      return {status:'error',error:{code:'VIDEO_QUEUE',message:error instanceof Error && !('code' in error) && error.message.length<=240 ? error.message : '视频队列操作未完成，请检查连接。'}};}
+  };
+  ipcMain.handle('smartsub-task:legacy-tracking',(event,...args)=>videoResult(event,()=>withVideoMode(async()=>{
+    const [id,mode]=args;
+    if(args.length!==2 || !isUuid(id)) throw new Error('视频任务标识无效。');
+    if(mode==='forget'){legacyForgotten.add(id);legacyRuns.delete(id);}
+    else if(mode==='download'||mode==='transcription'){if(!legacyForgotten.has(id)) legacyRuns.set(id,mode);}
+    else throw new Error('视频任务状态无效。');
+    return null;
+  })));
+  ipcMain.handle('video-queue:action',(event,...args)=>videoResult(event,async()=>{
+    const input=args[0] as VideoQueueAction;
+    if(args.length!==1||!input||typeof input!=='object') throw new Error('视频队列请求无效。');
+    switch(input.type){
+      case 'state': break;
+      case 'add':
+      case 'resume':
+      case 'retry':
+        await withVideoMode(async()=>{
+          if(legacyRuns.size) throw new Error('请先处理「单链接与旧任务」中的任务。');
+          if(input.type==='add') await videoQueue.add(input.links,input.autoTranscribe);
+          else if(input.type==='resume') await videoQueue.resume();
+          else if(isUuid(input.id)) await videoQueue.retry(input.id);
+          else throw new Error('视频任务标识无效。');
+        });
+        break;
+      case 'cancel':
+      case 'refresh':
+      case 'remove':
+        if(!isUuid(input.id)) throw new Error('视频任务标识无效。');
+        await videoQueue[input.type](input.id);
+        break;
+      default: throw new Error('视频队列请求无效。');
+    }
+    return videoQueue.state();
+  }));
+  const videoSubtitle = async (args:unknown[])=>{
+    const [id,index]=args;
+    if(args.length!==2 || !isUuid(id) || typeof index!=='number') throw new Error('字幕选择无效。');
+    const row=await videoQueue.subtitle(id,index);
+    if(row.lane==='download')return smartsubTasks.subtitle(row.requestId,index);
+    try {return await transcriptions.subtitle(row.requestId,index);}
+    catch(error) {
+      if(error instanceof TranscriptionOutputError && error.allUnavailable)
+        await videoQueue.noteUnavailableTranscription(id,row.requestId,error.issue);
+      throw error;
+    }
+  };
+  ipcMain.handle('video-queue:preview',(event,...args)=>videoResult(event,async()=>{
+    const {document}=await videoSubtitle(args);
+    return {name:document.fileName,format:document.format,lines:document.segments.slice(0,8).map(segment=>segment.text.slice(0,280))};
+  }));
+  ipcMain.handle('video-queue:open',(event,...args)=>videoResult(event,async()=>useSmartSubSource(await videoSubtitle(args))));
+  videoQueue.start();
   const results=new NoteResults(join(local,'note-results'),workspace);
   const organizationTasks=createOrganizationTasks();
   const diagnostic=(service:'api'|'subscription',sourceId:string)=>{
     const taskId=organizationTasks.start(service,sourceId);
     return {id:taskId,event:(phase:import('./organization-tasks.ts').DiagnosticPhase,ageMs?:number)=>organizationTasks.event(taskId,{phase,ageMs}),progress:(value:import('../contracts/analysis.ts').AnalysisProgress)=>organizationTasks.progress(taskId,value),
+      chunkProgress:(value:import('../contracts/analysis.ts').AnalysisChunkProgress)=>organizationTasks.chunkProgress(taskId,value),
       finish:(status:'succeeded'|'failed'|'cancelled',error?:string)=>organizationTasks.finish(taskId,status,error),pending:(resultId:string)=>organizationTasks.pending(taskId,resultId)};
   };
   ipcMain.handle('organization:list',(event,...args)=>trusted(event) && args.length===0 ? {status:'ok',value:organizationTasks.list()} : {status:'error',error:{code:'FORBIDDEN_REQUEST',message:'请求无效。'}});
   ipcMain.handle('organization:get',(event,...args)=>trusted(event) && args.length===1 && isUuid(args[0]) ? {status:'ok',value:organizationTasks.get(args[0]) ?? null} : {status:'error',error:{code:'FORBIDDEN_REQUEST',message:'请求无效。'}});
 
-  const subscriptionTask=createSubscriptionTask({trusted,diagnostic:sourceId=>diagnostic('subscription',sourceId),session:()=>subscription.getSession(),models:()=>subscription.listModels(),preview:(id,folder)=>workspace.previewOutput(id,folder),analyze:async(id,plan,profile,model,instructions,signal,onDiagnostic)=>{const release=workspace.lockPaths([plan.sourcePath,plan.notePath]);try{const source:SourceSnapshot=await tasks.run(join(__dirname,'source-worker.cjs'),{filePath:await workspace.filePath('source',id)});if(plan.sourceChecksum && source.document.checksum!==plan.sourceChecksum)throw new WorkspaceError('CONFLICT');return (await analyzeSubscription(source.document,subscription,profile,model,{signal,instructions,onDiagnostic})).markdown;}finally{release();}},stage:(plan,markdown)=>results.add(plan,markdown),discard:id=>results.remove(id)});
+  const subscriptionTask=createSubscriptionTask({trusted,diagnostic:sourceId=>diagnostic('subscription',sourceId),session:()=>subscription.getSession(),models:()=>subscription.listModels(),preview:(id,folder)=>workspace.previewOutput(id,folder),analyze:async(id,plan,profile,model,instructions,signal,onDiagnostic,onChunkProgress)=>{const release=workspace.lockPaths([plan.sourcePath,plan.notePath]);try{const source:SourceSnapshot=await tasks.run(join(__dirname,'source-worker.cjs'),{filePath:await workspace.filePath('source',id)});if(plan.sourceChecksum && source.document.checksum!==plan.sourceChecksum)throw new WorkspaceError('CONFLICT');return (await analyzeSubscription(source.document,subscription,profile,model,{signal,instructions,onDiagnostic,onChunkProgress})).markdown;}finally{release();}},stage:(plan,markdown)=>results.add(plan,markdown),discard:id=>results.remove(id)});
   for(const [action,handler] of Object.entries(subscriptionTask))ipcMain.handle(`subscription-task:${action}`,action==='start'?(event,...args)=>guarded(event,'subscription',()=>handler(event,...args)):handler);
   const exporter=new ArchiveExporter(workspace,()=>new StorageService(join(local,'storage')).state());
   const stopWatching=workspace.subscribe(change=>{if(!window.isDestroyed())window.webContents.send('workspace:changed',change);});
@@ -225,7 +344,7 @@ app.whenReady().then(() => {
       return await queuedWorkspace(event,kind,action,args);
     } finally { gateBusy = false; }
   });
-  const workflowHandlers = createWorkflowHandlers({ isTrustedSender: trusted, diagnostic:sourceId=>diagnostic('api',sourceId), source: id => snapshots.get(id), credentials: () => apiStore.credentials(),
+  const workflowHandlers = createWorkflowHandlers({ isTrustedSender: trusted, diagnostic:sourceId=>diagnostic('api',sourceId), source: id => snapshots.get(id), credentials: profile => apiStore.credentials(profile),
     hasDirectory: async () => Boolean((await tasks.run(join(__dirname, 'storage-worker.cjs'), { stateDir: join(local, 'storage'), action: 'state', payload: {} }, true)).directory),
     analyze: (source, credentials, options) => runAnalysisWorker(join(__dirname, 'analysis-worker.cjs'), source, credentials, options),
     save: (source, result) => tasks.run(join(__dirname, 'storage-worker.cjs'), { stateDir: join(local, 'storage'), action: 'save-generated', payload: { snapshot: source, markdown: result.markdown, metadata: { kind: 'generated-note', provider: result.attempt.provider, model: result.attempt.model, promptVersion: result.attempt.promptVersion, sourceRefs: result.sourceRefs } } }, true),
@@ -233,15 +352,20 @@ app.whenReady().then(() => {
   });
   const batchReuse=new BatchReuse();
   const batchHandlers = createBatchHandlers({ isTrustedSender: trusted,diagnostic:sourceId=>diagnostic('api',sourceId),resetAnalysis:()=>batchReuse.clear(),
-    config: async () => { const value = await apiStore.state(); if (!value.configured) throw new ApiError('INVALID_CONFIG'); return value; },
+    config: async ref => {
+      const value=await apiStore.profile(ref);
+      if (!value) throw new ApiError('INVALID_CONFIG');
+      return {...value,profile:{id:value.id,revision:value.revision}};
+    },
+    credentials:ref=>apiStore.credentials(ref),
     preview: (id, target) => workspace.previewOutput(id, target),
-    analyze: async (id, expected, signal,plan,report,onDiagnostic) => { const credentials = await apiStore.credentials(); if (credentials.baseUrl !== expected.baseUrl || credentials.model !== expected.model) throw new ApiError('INVALID_CONFIG');
+    analyze: async (id, expected, signal,plan,report,onDiagnostic,onChunkProgress,credentials) => { if (!credentials || credentials.baseUrl !== expected.baseUrl || credentials.model !== expected.model) throw new ApiError('INVALID_CONFIG');
       const started=performance.now();
       const source:SourceSnapshot = await tasks.run(join(__dirname, 'source-worker.cjs'), { filePath: await workspace.filePath('source', id) });
       if(plan.sourceChecksum && source.document.checksum!==plan.sourceChecksum)throw new WorkspaceError('CONFLICT');
       const prepareMs=performance.now()-started;let metrics:AnalysisMetrics={prepareMs:0,apiMs:0,localMs:0,requests:0};
       const value=await batchReuse.run(source.document,credentials,expected.instructions??'',signal,async(checkpoints)=>{
-        const result=await runAnalysisWorker(join(__dirname, 'analysis-worker.cjs'), source.document, credentials, { signal, checkpoints, instructions: expected.instructions,onDiagnostic,onProgress:value=>report(value),onMetrics:value=>{metrics=value;report(undefined,{...metrics,prepareMs:prepareMs+metrics.prepareMs,saveMs:0});} });return result.markdown;
+        const result=await runAnalysisWorker(join(__dirname, 'analysis-worker.cjs'), source.document, credentials, { signal, checkpoints, instructions: expected.instructions,onDiagnostic,onChunkProgress,onProgress:value=>report(value),onMetrics:value=>{metrics=value;report(undefined,{...metrics,prepareMs:prepareMs+metrics.prepareMs,saveMs:0});} });return result.markdown;
       });return {...value,timing:{...metrics,prepareMs:prepareMs+metrics.prepareMs,saveMs:0}}; },
     save: (id, target, plan, markdown) => workspace.writeOutput(id, target, plan, markdown),
     lock:plans=>workspace.lockPaths(plans.flatMap(plan=>[plan.sourcePath,plan.notePath])),
@@ -250,9 +374,17 @@ app.whenReady().then(() => {
   const fileAction=async(event:unknown,run:()=>Promise<unknown>)=>{
     if(!trusted(event) || gateBusy)return {status:'error',error:{code:'BUSY',message:'操作未完成，请稍后重试。'}};
     gateBusy=true;try{return {status:'ok',value:await run()};}catch(error){const code=error instanceof WorkspaceError?error.code:(error as NodeJS.ErrnoException).code;
-      return {status:'error',error:{code:code??'FAILED',message:code==='CONFLICT' || code==='EEXIST'?'文件已存在或已被修改，请更改名称、位置或重新确认。':code==='BUSY'?'此文件正用于整理任务，请稍后操作。':code==='MISSING' || code==='ENOENT'?'原位置不可用，请重新选择位置。':'操作未完成，请检查文件、目录和权限。'}};
+      return {status:'error',error:{code:code??'FAILED',message:code==='SOURCE_ROOT_REQUIRED'?'请先在左侧选择资料文件夹。':code==='CONFLICT' || code==='EEXIST'?'文件已存在或已被修改，请更改名称、位置或重新确认。':code==='BUSY'?'此文件正用于整理任务，请稍后操作。':code==='MISSING' || code==='ENOENT'?'原位置不可用，请重新选择位置。':'操作未完成，请检查文件、目录和权限。'}};
     }finally{gateBusy=false;}
   };
+  ipcMain.handle('smartsub:copy-source', (event, ...args) => fileAction(event, async () => {
+    const [id, checksum] = args;
+    if (args.length !== 2 || !isUuid(id) || !smartsubSources.has(id) || typeof checksum !== 'string') throw new WorkspaceError('INVALID_REQUEST');
+    const filePath = await workspace.filePath('source', id);
+    const bytes = await readBytes(filePath);
+    if (digest(bytes) !== checksum) throw new WorkspaceError('CONFLICT');
+    return workspace.copySubtitle(basename(filePath), bytes);
+  }));
   ipcMain.handle('results:list',(event,...args)=>fileAction(event,async()=>{if(args.length)throw new WorkspaceError('INVALID_REQUEST');return results.list();}));
   const diagnosticSaveTokens=new Map<string,string>();
   ipcMain.handle('results:prepare',(event,...args)=>fileAction(event,async()=>{const [id,folder,name]=args;if(args.length<1 || args.length>3 || !isUuid(id) || (folder!==undefined && !isUuid(folder)) || (name!==undefined && (typeof name!=='string' || name.length>200)))throw new WorkspaceError('INVALID_REQUEST');const preview=await results.prepare(id,folder,name);diagnosticSaveTokens.set(preview.token,id);if(diagnosticSaveTokens.size>100)diagnosticSaveTokens.delete(diagnosticSaveTokens.keys().next().value!);return preview;}));
@@ -273,10 +405,11 @@ app.whenReady().then(() => {
   for (const [action, handler] of Object.entries(workflowHandlers)) ipcMain.handle(`workflow:${action}`, action === 'start' || action === 'retry' ? (event, ...args) => guarded(event, 'single', () => handler(event, ...args)) : handler);
   for (const [action, handler] of Object.entries(batchHandlers).filter(([action])=>action!=='saved')) ipcMain.handle(`batch:${action}`, action === 'start' || action === 'retry' ? (event, ...args) => guarded(event, 'batch', () => handler(event, ...args)) : handler);
   const apiHandlers = createApiHandlers({ isTrustedSender: trusted, store: apiStore, models: async (input, signal) => {
-    const baseUrl = normalizeBaseUrl(input.baseUrl); const key = await resolveModelKey(apiStore, baseUrl, input.apiKey);
+    if(input.profile===null && !input.apiKey) throw new ApiError('KEY_REQUIRED');
+    const baseUrl = normalizeBaseUrl(input.baseUrl); const key = input.apiKey ? await resolveModelKey(apiStore,baseUrl,input.apiKey) : (await apiStore.credentials(input.profile??undefined,baseUrl)).apiKey;
     return listModels(baseUrl, key, signal);
-  }, test: async signal => {
-    const credentials = await apiStore.credentials();
+  }, test: async (signal,ref) => {
+    const credentials = await apiStore.credentials(ref);
     const source = parseSource(Buffer.from('ClipNote 合成连接测试。'), '测试.txt');
     const profile = { provider: 'api', model: credentials.model, promptVersion: 't06-v1', inputCharBudget: 2000, outputCharBudget: 64000, overlapChars: 0 };
     const chunk = planAnalysis(source, profile).chunks[0];
@@ -292,6 +425,10 @@ app.whenReady().then(() => {
     for(const action of Object.keys(subscriptionTask))ipcMain.removeHandler(`subscription-task:${action}`);
     for (const action of Object.keys(subscriptionHandlers)) ipcMain.removeHandler(`subscription:${action}`);
     for(const action of ['state','save'])ipcMain.removeHandler(`smartsub-preferences:${action}`);
+    videoQueue.stop();
+    ipcMain.removeHandler('smartsub-task:legacy-tracking');
+    for (const action of ['action','preview','open']) ipcMain.removeHandler('video-queue:'+action);
+    ipcMain.removeHandler('smartsub:copy-source');
     for(const action of ['state','choose','openOfficial'])ipcMain.removeHandler(`smartsub:${action}`);
     for(const action of Object.keys(smartsubTaskHandlers))ipcMain.removeHandler(`smartsub-task:${action}`);
     stopWatching();
